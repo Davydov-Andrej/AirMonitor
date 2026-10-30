@@ -13,8 +13,12 @@ public struct ChannelSnapshot: Identifiable, Sendable {
     public let crestFactorDB: Float
     public let momentaryLUFS: Float
     public let shortTermLUFS: Float
+    public let integratedLUFS: Float
+    public let loudnessRangeLU: Float
     public let spectrum: [SpectrumPoint]
     public let rtaBands: [RTABand]
+    public let fineCurve: [SpectrumPoint]
+    public let loudnessHistory: [LoudnessMeter.HistoryPoint]
 
     public init(
         id: Int,
@@ -27,7 +31,11 @@ public struct ChannelSnapshot: Identifiable, Sendable {
         momentaryLUFS: Float,
         shortTermLUFS: Float,
         spectrum: [SpectrumPoint],
-        rtaBands: [RTABand] = []
+        rtaBands: [RTABand] = [],
+        fineCurve: [SpectrumPoint] = [],
+        loudnessHistory: [LoudnessMeter.HistoryPoint] = [],
+        integratedLUFS: Float = -Float.infinity,
+        loudnessRangeLU: Float = 0
     ) {
         self.id = id
         self.label = label
@@ -40,6 +48,10 @@ public struct ChannelSnapshot: Identifiable, Sendable {
         self.shortTermLUFS = shortTermLUFS
         self.spectrum = spectrum
         self.rtaBands = rtaBands
+        self.fineCurve = fineCurve
+        self.loudnessHistory = loudnessHistory
+        self.integratedLUFS = integratedLUFS
+        self.loudnessRangeLU = loudnessRangeLU
     }
 
     public static let empty = ChannelSnapshot(
@@ -63,11 +75,18 @@ public final class AudioDataPublisher: @unchecked Sendable {
         public var fftLength: Int = 8192
         public var updateRateHz: Double = 25
         public var windowType: FFT.WindowType = .hann
+        public var rta: RTASettings = .default
 
-        public init(fftLength: Int = 8192, updateRateHz: Double = 25, windowType: FFT.WindowType = .hann) {
+        public init(
+            fftLength: Int = 8192,
+            updateRateHz: Double = 25,
+            windowType: FFT.WindowType = .hann,
+            rta: RTASettings = .default
+        ) {
             self.fftLength = fftLength
             self.updateRateHz = updateRateHz
             self.windowType = windowType
+            self.rta = rta
         }
     }
 
@@ -162,6 +181,7 @@ public final class AudioDataPublisher: @unchecked Sendable {
 
     private func makeRuntime(for config: MonitorBusConfig, deviceID: AudioDeviceID, rate: Double) -> BusRuntime? {
         let fftLength = config.fftLength > 0 ? config.fftLength : settings.fftLength
+        let rta = settings.rta
         switch config.mode {
         case .mono(let channels):
             guard !channels.isEmpty else { return nil }
@@ -172,7 +192,8 @@ public final class AudioDataPublisher: @unchecked Sendable {
                     label: "\(config.name) · \(ch + 1)",
                     sampleRate: Float(rate),
                     fftLength: fftLength,
-                    windowType: config.windowType
+                    windowType: config.windowType,
+                    rtaSettings: rta
                 )
             }
             return BusRuntime(config: config, deviceID: deviceID, monoAnalyzers: analyzers, stereoAnalyzer: nil)
@@ -184,7 +205,8 @@ public final class AudioDataPublisher: @unchecked Sendable {
                 label: config.name,
                 sampleRate: Float(rate),
                 fftLength: fftLength,
-                windowType: config.windowType
+                windowType: config.windowType,
+                rtaSettings: rta
             )
             return BusRuntime(config: config, deviceID: deviceID, monoAnalyzers: [:], stereoAnalyzer: stereo)
         }

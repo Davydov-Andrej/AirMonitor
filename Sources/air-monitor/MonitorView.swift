@@ -1,7 +1,7 @@
 import SwiftUI
 import yaCore
 
-/// Монитор: уровни по всем шинам.
+/// Монитор: уровни + история громкости по всем шинам.
 struct MonitorView: View {
     @EnvironmentObject var model: AppModel
 
@@ -9,15 +9,34 @@ struct MonitorView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Уровни и динамика")
                 .font(.title2)
-            ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 320))], spacing: 12) {
-                    ForEach(model.snapshot.buses) { bus in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(bus.name)
-                                .font(.headline)
-                            ForEach(bus.displayChannels) { channel in
-                                ChannelMeterCard(snapshot: channel)
+            if model.snapshot.buses.isEmpty {
+                ContentUnavailableView("Нет данных", systemImage: "waveform", description: Text("Запустите захват (Старт)"))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    VStack(spacing: 14) {
+                        ForEach(model.snapshot.buses) { bus in
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text(bus.name).font(.headline)
+                                    Spacer()
+                                    if let integrated = bus.displayChannels.first?.integratedLUFS, integrated.isFinite {
+                                        Text(String(format: "Integrated %.1f LUFS", integrated))
+                                            .font(.caption.monospacedDigit())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    if let lra = bus.displayChannels.first?.loudnessRangeLU, lra > 0 {
+                                        Text(String(format: "LRA %.1f LU", lra))
+                                            .font(.caption.monospacedDigit())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                ForEach(bus.displayChannels) { channel in
+                                    ChannelMeterCard(snapshot: channel)
+                                }
                             }
+                            .padding()
+                            .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
                         }
                     }
                 }
@@ -34,7 +53,7 @@ struct ChannelMeterCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(snapshot.label)
-                    .font(.headline)
+                    .font(.subheadline.weight(.medium))
                 Spacer()
                 Text(snapshot.peakDB.isFinite
                      ? String(format: "%.1f dBFS", snapshot.peakDB)
@@ -49,15 +68,14 @@ struct ChannelMeterCard: View {
                 metric("RMS", snapshot.rmsDB)
                 metric("TruePeak", snapshot.truePeakDB)
                 metric("Crest", snapshot.crestFactorDB, suffix: " dB")
+                metric("Integr.", snapshot.integratedLUFS, suffix: " LU")
             }
 
-            HStack(spacing: 12) {
-                metric("Momentary", snapshot.momentaryLUFS, suffix: " LUFS")
-                metric("Short", snapshot.shortTermLUFS, suffix: " LUFS")
-            }
+            LoudnessHistoryChart(history: snapshot.loudnessHistory, target: -23)
+                .frame(height: 70)
         }
         .padding()
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.03)))
     }
 
     private func metric(_ name: String, _ value: Float, suffix: String = " dB") -> some View {

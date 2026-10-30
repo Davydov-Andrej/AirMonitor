@@ -31,12 +31,24 @@ public final class LoudnessMeter {
         )
     }
 
+    /// Точка истории громкости (для бегущего графика).
+    public struct HistoryPoint: Sendable {
+        public let momentary: Float
+        public let shortTerm: Float
+        public let peak: Float
+    }
+
     private let sampleRate: Double
     private let blockSize: Int
     private var allSamples: [Float] = []
     private var blockStart = 0
     private var blockLevels: [Float] = []
     private var kFilter: KWeightingFilter
+
+    /// История short-term громкости (шаг ~0.4 с) — для графика.
+    public private(set) var history: [HistoryPoint] = []
+    /// Максимум истории (по умолчанию 15 минут эфира).
+    public var historyCapacity: Int = 2250
 
     public private(set) var momentary: Float = -Float.infinity
     public private(set) var shortTerm: Float = -Float.infinity
@@ -70,8 +82,18 @@ public final class LoudnessMeter {
         }
     }
 
+    public func resetHistory() {
+        lock.lock()
+        history.removeAll()
+        blockLevels.removeAll()
+        integrated = -Float.infinity
+        lock.unlock()
+    }
+
     public func reading() -> Reading {
-        Reading(
+        lock.lock()
+        defer { lock.unlock() }
+        return Reading(
             momentaryLUFS: momentary,
             shortTermLUFS: shortTerm,
             integratedLUFS: integrated,
@@ -79,6 +101,8 @@ public final class LoudnessMeter {
             truePeakDB: truePeakDB
         )
     }
+
+    private let lock = NSLock()
 
     // MARK: - Private
 
@@ -88,25 +112,39 @@ public final class LoudnessMeter {
         var sumSquares: Float = 0
         vDSP_svesq(filtered, 1, &sumSquares, vDSP_Length(filtered.count))
         let meanSquare = sumSquares / Float(filtered.count)
-        guard meanSquare > 1e-12 else { return }
 
-        let level = -0.691 + 10 * log10(meanSquare)
-        blockLevels.append(level)
-        if blockLevels.count > 1000 {
-            blockLevels.removeFirst(blockLevels.count / 2)
+        if meanSquare > 1e-12 {
+            let level = -0.691 + 10 * log10(meanSquare)
+            blockLevels.append(level)
+            if blockLevels.count > 2000 {
+                blockLevels.removeFirst(1000)
+            }
+
+            momentary = level
+            shortTerm = mean(of: Array(blockLevels.suffix(shortTermBlockCount)))
+
+            let gateThreshold = currentGateThreshold
+            let gated = blockLevels.filter { $0 >= gateThreshold }
+            if !gated.isEmpty {
+                integrated = mean(of: gated)
+            }
+
+            loudnessRange = computeLoudnessRange()
+        } else {
+            momentary = -Float.infinity
+            // short-term продолжаем считать (там окна длинные)
+            shortTerm = mean(of: Array(blockLevels.suffix(shortTermBlockCount)))
         }
 
-        momentary = level
-
-        shortTerm = mean(of: Array(blockLevels.suffix(shortTermBlockCount)))
-
-        let gateThreshold = currentGateThreshold
-        let gated = blockLevels.filter { $0 >= gateThreshold }
-        if !gated.isEmpty {
-            integrated = mean(of: gated)
+        // История: точка на каждый 0.4-секундный блок.
+        let hp = HistoryPoint(momentary: momentary, shortTerm: shortTerm, peak: truePeakDB)
+        lock.lock()
+        history.append(hp)
+        if history.count > historyCapacity {
+            history.removeFirst(history.count - historyCapacity)
         }
+        lock.unlock()
 
-        loudnessRange = computeLoudnessRange()
         trackTruePeak(in: filtered)
     }
 

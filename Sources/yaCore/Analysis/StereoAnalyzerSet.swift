@@ -33,18 +33,18 @@ public final class StereoAnalyzerSet {
                                                 sampleRate: sampleRate, fftLength: fftLength, windowType: windowType)
     }
 
-    public init(left: Int, right: Int, label: String, sampleRate: Float, fftLength: Int, windowType: FFT.WindowType = .hann) {
+    public init(left: Int, right: Int, label: String, sampleRate: Float, fftLength: Int, windowType: FFT.WindowType = .hann, rtaSettings: RTASettings = .default) {
         self.leftChannelIndex = left
         self.rightChannelIndex = right
         self.label = label
         let labelL = "\(label) · L"
         let labelR = "\(label) · R"
         self.monoAnalyzer = ChannelAnalyzerSet(channelIndex: -1, label: "\(label) (L+R)",
-                                               sampleRate: sampleRate, fftLength: fftLength, windowType: windowType)
+                                               sampleRate: sampleRate, fftLength: fftLength, windowType: windowType, rtaSettings: rtaSettings)
         self.leftAnalyzer = ChannelAnalyzerSet(channelIndex: left, label: labelL,
-                                               sampleRate: sampleRate, fftLength: fftLength, windowType: windowType)
+                                               sampleRate: sampleRate, fftLength: fftLength, windowType: windowType, rtaSettings: rtaSettings)
         self.rightAnalyzer = ChannelAnalyzerSet(channelIndex: right, label: labelR,
-                                                sampleRate: sampleRate, fftLength: fftLength, windowType: windowType)
+                                                sampleRate: sampleRate, fftLength: fftLength, windowType: windowType, rtaSettings: rtaSettings)
     }
 
     public func push(channel: Int, samples: [Float]) {

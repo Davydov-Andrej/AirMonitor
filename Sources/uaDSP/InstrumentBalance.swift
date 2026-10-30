@@ -74,7 +74,7 @@ public enum InstrumentBand: CaseIterable, Identifiable, Sendable {
 }
 
 /// Результат спектрального сравнения текущего микса с референсом.
-public struct InstrumentBalance {
+public struct InstrumentBalance: Sendable {
     public let band: InstrumentBand
     /// Энергия в дБFS средняя по полосе за окно.
     public let energyDB: Float

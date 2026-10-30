@@ -1,15 +1,14 @@
 import SwiftUI
 import yaCore
 
-/// Диалог добавления новой шины мониторинга.
-/// Позволяет выбрать устройство, режим (стерео/моно), каналы и имя.
+/// Диалог добавления/редактирования шины мониторинга.
 struct AddBusSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Новая шина мониторинга")
+            Text(model.isEditingBus ? "Редактировать шину" : "Новая шина мониторинга")
                 .font(.title2)
 
             Form {
@@ -49,32 +48,11 @@ struct AddBusSheet: View {
                             }
                         }
                     } else {
-                        let count = model.draftChannelCount
-                        if count == 0 {
-                            Text("Выберите устройство")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            HStack(spacing: 8) {
-                                ForEach(0..<count, id: \.self) { i in
-                                    Button {
-                                        if model.draftMonoChannels.contains(i) {
-                                            model.draftMonoChannels.remove(i)
-                                        } else {
-                                            model.draftMonoChannels.insert(i)
-                                        }
-                                    } label: {
-                                        Text("\(i + 1)")
-                                            .font(.system(.body, design: .monospaced))
-                                            .frame(width: 34, height: 34)
-                                            .background(
-                                                Circle().fill(model.draftMonoChannels.contains(i) ? Color.accentColor : Color(nsColor: .controlBackgroundColor))
-                                            )
-                                            .foregroundStyle(model.draftMonoChannels.contains(i) ? .white : .primary)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
+                        // Выпадающий список с галочками вместо растянутой ленты.
+                        MultiChannelPicker(
+                            channelCount: model.draftChannelCount,
+                            selected: $model.draftMonoChannels
+                        )
                     }
                 }
 
@@ -89,7 +67,7 @@ struct AddBusSheet: View {
                 Button("Отмена") {
                     dismiss()
                 }
-                Button("Добавить") {
+                Button(model.isEditingBus ? "Сохранить" : "Добавить") {
                     model.commitDraftBus()
                     if model.errorMessage == nil {
                         dismiss()
@@ -100,5 +78,73 @@ struct AddBusSheet: View {
         }
         .padding()
         .frame(width: 560)
+    }
+}
+
+/// Выпадающий список с чекбоксами для выбора нескольких каналов.
+struct MultiChannelPicker: View {
+    let channelCount: Int
+    @Binding var selected: Set<Int>
+
+    @State private var isOpen = false
+
+    private var summary: String {
+        if selected.isEmpty { return "Выберите каналы" }
+        if selected.count <= 6 {
+            return selected.sorted().map { "\($0 + 1)" }.joined(separator: ", ")
+        }
+        return "Выбрано \(selected.count) каналов"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                isOpen.toggle()
+            } label: {
+                HStack {
+                    Text(summary)
+                        .foregroundStyle(selected.isEmpty ? .secondary : .primary)
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(6)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor)))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3)))
+            }
+            .buttonStyle(.plain)
+
+            if isOpen {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(0..<max(channelCount, 0), id: \.self) { i in
+                            Button {
+                                if selected.contains(i) {
+                                    selected.remove(i)
+                                } else {
+                                    selected.insert(i)
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: selected.contains(i) ? "checkmark.square.fill" : "square")
+                                        .foregroundStyle(selected.contains(i) ? Color.accentColor : .secondary)
+                                    Text("Канал \(i + 1)")
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(maxHeight: 220)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor)))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3)))
+            }
+        }
     }
 }

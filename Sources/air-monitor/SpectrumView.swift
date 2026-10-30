@@ -45,75 +45,15 @@ struct SpectrumChannelCard: View {
                 Text(channel.label)
                     .font(.subheadline)
                 Spacer()
-                Text("1/3 октавы · 31 полоса")
+                Text("октавные полосы + кривая 1/24 октавы")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            SpectrumChart(points: channel.spectrum, minDB: -80, maxDB: 0)
-                .frame(height: 180)
-            RTABarsChart(bands: channel.rtaBands)
-                .frame(height: 70)
+            SpectrumCurveChart(fine: channel.fineCurve, bands: channel.rtaBands)
+                .frame(height: 220)
         }
         .padding()
         .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
     }
 }
 
-struct SpectrumChart: View {
-    let points: [SpectrumPoint]
-    let minDB: Float
-    let maxDB: Float
-
-    var body: some View {
-        Canvas { context, size in
-            guard points.count > 1 else { return }
-
-            for i in 1..<6 {
-                let y = size.height * CGFloat(i) / 6
-                var line = Path()
-                line.move(to: CGPoint(x: 0, y: y))
-                line.addLine(to: CGPoint(x: size.width, y: y))
-                context.stroke(line, with: .color(.gray.opacity(0.25)), lineWidth: 0.5)
-            }
-
-            let dx = size.width / CGFloat(max(points.count - 1, 1))
-            var path = Path()
-            for (i, point) in points.enumerated() {
-                let y = yPosition(point.magnitudeDB, height: size.height)
-                let x = CGFloat(i) * dx
-                if i == 0 {
-                    path.move(to: CGPoint(x: x, y: y))
-                } else {
-                    path.addLine(to: CGPoint(x: x, y: y))
-                }
-            }
-            context.stroke(path, with: .color(.accentColor), style: StrokeStyle(lineWidth: 1.5))
-
-            let labels: [(Float, String)] = [(20, "20"), (100, "100"), (1000, "1k"), (10000, "10k"), (20000, "20k")]
-            for (freq, label) in labels {
-                let fx = xPosition(freq, width: size.width)
-                let text = Text(label).font(.system(size: 9)).foregroundStyle(.secondary)
-                context.draw(text, at: CGPoint(x: fx, y: size.height - 10))
-            }
-
-            for db in [Float(0), -20, -40, -60, -80] {
-                let fy = yPosition(db, height: size.height)
-                let text = Text("\(Int(db))").font(.system(size: 9)).foregroundStyle(.secondary)
-                context.draw(text, at: CGPoint(x: 8, y: fy - 4), anchor: .topLeading)
-            }
-        }
-        .drawingGroup()
-    }
-
-    private func xPosition(_ freq: Float, width: CGFloat) -> CGFloat {
-        let logMin = log10f(20)
-        let logMax = log10f(20000)
-        let t = (log10f(freq) - logMin) / (logMax - logMin)
-        return CGFloat(max(0, min(1, t))) * width
-    }
-
-    private func yPosition(_ db: Float, height: CGFloat) -> CGFloat {
-        let t = (db - minDB) / (maxDB - minDB)
-        return height * (1 - CGFloat(max(0, min(1, t))))
-    }
-}

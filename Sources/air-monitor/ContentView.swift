@@ -17,6 +17,8 @@ struct ContentView: View {
                     .tabItem { Label("Спектр (АЧХ)", systemImage: "chart.bar.xaxis") }
                 BalanceView()
                     .tabItem { Label("Баланс микса", systemImage: "slider.horizontal.3") }
+                SettingsView()
+                    .tabItem { Label("Настройки", systemImage: "gearshape") }
             }
         }
         .onAppear {
@@ -58,12 +60,11 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            if !model.isCapturing {
-                Button {
-                    model.isPresentingAddBus = true
-                } label: {
-                    Label("Шина", systemImage: "plus")
-                }
+            // Добавление шин доступно всегда, в т.ч. во время мониторинга.
+            Button {
+                model.beginAddBus()
+            } label: {
+                Label("Шина", systemImage: "plus")
             }
             Button(model.isCapturing ? "Стоп" : "Старт") {
                 if model.isCapturing {

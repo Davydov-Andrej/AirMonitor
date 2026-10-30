@@ -15,6 +15,7 @@ public final class ChannelAnalyzerSet {
 
     public private(set) var lastSpectrum: [SpectrumPoint] = []
     public private(set) var rtaBands: [RTABand] = []
+    public private(set) var rtaFineCurve: [SpectrumPoint] = []
 
     public init(channelIndex: Int, sampleRate: Float, fftLength: Int, windowType: FFT.WindowType = .hann) {
         self.channelIndex = channelIndex
@@ -26,14 +27,14 @@ public final class ChannelAnalyzerSet {
         self.rta = RTASpectrumAnalyzer(length: fftLength, sampleRate: sampleRate, windowType: windowType)
     }
 
-    public init(channelIndex: Int, label: String, sampleRate: Float, fftLength: Int, windowType: FFT.WindowType = .hann) {
+    public init(channelIndex: Int, label: String, sampleRate: Float, fftLength: Int, windowType: FFT.WindowType = .hann, rtaSettings: RTASettings = .default) {
         self.channelIndex = channelIndex
         self.label = label
         self.sampleRate = sampleRate
         self.vu = VUMeter(sampleRate: sampleRate)
         self.dynamics = DynamicsAnalyzer()
         self.loudness = LoudnessMeter(sampleRate: Double(sampleRate))
-        self.rta = RTASpectrumAnalyzer(length: fftLength, sampleRate: sampleRate, windowType: windowType)
+        self.rta = RTASpectrumAnalyzer(length: fftLength, sampleRate: sampleRate, settings: rtaSettings, windowType: windowType)
     }
 
     public func process(_ samples: [Float], sampleRate: Float) {
@@ -44,6 +45,7 @@ public final class ChannelAnalyzerSet {
         rta.process(samples)
         lastSpectrum = rta.spectrumPoints()
         rtaBands = rta.bands
+        rtaFineCurve = rta.fineCurve
     }
 
     public func snapshot() -> ChannelSnapshot {
@@ -53,6 +55,7 @@ public final class ChannelAnalyzerSet {
     public func snapshot(label: String) -> ChannelSnapshot {
         let reading = loudness.reading()
         let profile = dynamics.profile()
+        let history = loudness.history
         return ChannelSnapshot(
             id: channelIndex,
             label: label,
@@ -63,7 +66,12 @@ public final class ChannelAnalyzerSet {
             crestFactorDB: profile.crestFactorDB,
             momentaryLUFS: reading.momentaryLUFS,
             shortTermLUFS: reading.shortTermLUFS,
-            spectrum: lastSpectrum
+            spectrum: lastSpectrum,
+            rtaBands: rtaBands,
+            fineCurve: rtaFineCurve,
+            loudnessHistory: history,
+            integratedLUFS: reading.integratedLUFS,
+            loudnessRangeLU: reading.loudnessRangeLU
         )
     }
 }

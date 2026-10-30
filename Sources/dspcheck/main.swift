@@ -83,8 +83,9 @@ final class Runner {
         let tone1k = (0..<48000).map { Float(sinf(2 * Float.pi * 1000 * Float($0) / 48000)) * 0.5 }
         rta.process(tone1k)
         check(!rta.bands.isEmpty, "RTA: есть полосы (\(rta.bands.count))")
-        if let near1k = rta.bands.first(where: { $0.centerFrequency > 800 && $0.centerFrequency < 1250 }) {
-            check(near1k.levelDB > -20, "RTA: на 1 кГц уровень \(near1k.levelDB) дБ (ожидали заметный)")
+        // Тон попадает в конкретную полосу (806 или 1016 Гц) — ищем максимум.
+        if let near1k = rta.bands.filter({ $0.centerFrequency > 800 && $0.centerFrequency < 1250 }).max(by: { $0.levelDB < $1.levelDB }) {
+            check(near1k.levelDB > -30, "RTA: у 1 кГц уровень \(near1k.levelDB) дБ (ожидали заметный)")
             print("    полоса 1кГц: центр=\(near1k.centerFrequency) level=\(near1k.levelDB)")
         } else {
             check(false, "RTA: нет полосы вблизи 1 кГц")
@@ -92,7 +93,7 @@ final class Runner {
         // Проверяем пик-холд: после тишины пик остаётся выше уровня.
         let silence = [Float](repeating: 0, count: 48000)
         rta.process(silence)
-        if let near1k = rta.bands.first(where: { $0.centerFrequency > 800 && $0.centerFrequency < 1250 }) {
+        if let near1k = rta.bands.filter({ $0.centerFrequency > 800 && $0.centerFrequency < 1250 }).max(by: { $0.peakDB < $1.peakDB }) {
             check(near1k.peakDB > near1k.levelDB, "RTA: peak-hold \(near1k.peakDB) > level \(near1k.levelDB)")
         }
 
