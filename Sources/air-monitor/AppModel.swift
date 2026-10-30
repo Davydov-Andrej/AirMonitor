@@ -55,13 +55,23 @@ final class AppModel: ObservableObject {
     @Published var sceneSaveName: String = ""
 
     // Настройки
-    @Published var rtaSettings = RTASettings.default
-    @Published var updateRateHz: Double = 25
-
-    /// Применить новые настройки RTA к работающим анализаторам (на лету).
-    func applyRTASettings() {
-        // Настройки применяются при следующем старте захвата — анализаторы
-        // создаются заново с текущими rtaSettings.
+    @Published var rtaSettings = RTASettings.default {
+        didSet {
+            // Мгновенное применение к работающим анализаторам.
+            publisher?.applyRTASettings(rtaSettings)
+            persistRTASettings()
+        }
+    }
+    @Published var updateRateHz: Double = 25 {
+        didSet {
+            persistUpdateRate()
+        }
+    }
+    /// Показывать русские пояснения к метрикам.
+    @Published var showMetricHints: Bool {
+        didSet {
+            UserDefaults.standard.set(showMetricHints, forKey: "AirMonitor.showMetricHints")
+        }
     }
 
     let deviceEngine = MultiDeviceCapture()
@@ -72,11 +82,32 @@ final class AppModel: ObservableObject {
     private let lastSceneKey = "AirMonitor.lastScene"
 
     init() {
+        showMetricHints = UserDefaults.standard.bool(forKey: "AirMonitor.showMetricHints")
+        loadSettings()
         loadScenes()
         if let lastName = UserDefaults.standard.string(forKey: lastSceneKey),
            let scene = scenes.first(where: { $0.name == lastName }) {
             restore(scene: scene)
         }
+    }
+
+    private func loadSettings() {
+        if let data = UserDefaults.standard.data(forKey: "AirMonitor.rtaSettings"),
+           let decoded = try? JSONDecoder().decode(RTASettingsDTO.self, from: data) {
+            rtaSettings = decoded.toSettings()
+        }
+        let rate = UserDefaults.standard.double(forKey: "AirMonitor.updateRate")
+        if rate > 0 { updateRateHz = rate }
+    }
+
+    private func persistRTASettings() {
+        if let data = try? JSONEncoder().encode(RTASettingsDTO(from: rtaSettings)) {
+            UserDefaults.standard.set(data, forKey: "AirMonitor.rtaSettings")
+        }
+    }
+
+    private func persistUpdateRate() {
+        UserDefaults.standard.set(updateRateHz, forKey: "AirMonitor.updateRate")
     }
 
     // MARK: - Устройства
@@ -219,6 +250,18 @@ final class AppModel: ObservableObject {
     /// Переместить шину (порядок отображения).
     func moveBus(from offsets: IndexSet, to destination: Int) {
         buses.move(fromOffsets: offsets, toOffset: destination)
+        autosaveCurrentScene()
+    }
+
+    func moveBusUp(id: BusID) {
+        guard let index = buses.firstIndex(where: { $0.id == id }), index > 0 else { return }
+        buses.swapAt(index, index - 1)
+        autosaveCurrentScene()
+    }
+
+    func moveBusDown(id: BusID) {
+        guard let index = buses.firstIndex(where: { $0.id == id }), index < buses.count - 1 else { return }
+        buses.swapAt(index, index + 1)
         autosaveCurrentScene()
     }
 

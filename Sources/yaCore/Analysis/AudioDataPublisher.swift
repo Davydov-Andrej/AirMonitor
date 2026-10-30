@@ -93,6 +93,8 @@ public final class AudioDataPublisher: @unchecked Sendable {
     public let deviceEngine = MultiDeviceCapture()
 
     private let settings: Settings
+    /// Serial-очередь: вся DSP-обработка здесь, стабильный темп без гонок.
+    private let analysisQueue = DispatchQueue(label: "airmonitor.analysis", qos: .userInteractive)
     private let lock = NSLock()
 
     private var buses: [BusID: BusRuntime] = [:]
@@ -213,18 +215,22 @@ public final class AudioDataPublisher: @unchecked Sendable {
     }
 
     private func ingest(frame: Frame, from deviceID: AudioDeviceID) {
-        lock.lock()
-        let busCopies = buses.values
-            .filter { $0.deviceID == deviceID }
-            .compactMap { $0.copyForProcessing() }
-        lock.unlock()
+        // Вся обработка — на одной serial-очереди: стабильный темп, без гонок.
+        analysisQueue.async { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            let busCopies = self.buses.values
+                .filter { $0.deviceID == deviceID }
+                .map { $0 }
+            self.lock.unlock()
 
-        let sampleRate = Float(frame.sampleRate)
-        for runtime in busCopies {
-            runtime.process(frame, sampleRate: sampleRate)
+            let sampleRate = Float(frame.sampleRate)
+            for runtime in busCopies {
+                runtime.process(frame, sampleRate: sampleRate)
+            }
+
+            self.maybePublish()
         }
-
-        maybePublish()
     }
 
     private func maybePublish() {
@@ -255,6 +261,19 @@ public final class AudioDataPublisher: @unchecked Sendable {
 
         publish?(app)
     }
+
+    /// Применяет настройки RTA ко всем работающим анализаторам немедленно.
+    public func applyRTASettings(_ newSettings: RTASettings) {
+        analysisQueue.async { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            let runtimes = Array(self.buses.values)
+            self.lock.unlock()
+            for runtime in runtimes {
+                runtime.applyRTASettings(newSettings)
+            }
+        }
+    }
 }
 
 /// Рантайм одной шины: анализаторы каналов/стерео.
@@ -284,6 +303,14 @@ public final class BusRuntime: @unchecked Sendable {
             monoAnalyzers: monoAnalyzers,
             stereoAnalyzer: stereoAnalyzer
         )
+    }
+
+    /// Применяет настройки RTA ко всем анализаторам шины немедленно.
+    public func applyRTASettings(_ newSettings: RTASettings) {
+        monoAnalyzers.values.forEach { $0.applyRTASettings(newSettings) }
+        stereoAnalyzer?.monoAnalyzer.applyRTASettings(newSettings)
+        stereoAnalyzer?.leftAnalyzer.applyRTASettings(newSettings)
+        stereoAnalyzer?.rightAnalyzer.applyRTASettings(newSettings)
     }
 
     public func process(_ frame: Frame, sampleRate: Float) {

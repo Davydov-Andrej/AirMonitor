@@ -1,8 +1,10 @@
 import SwiftUI
 import yaCore
 
-/// Дашборд: каждая шина — отдельная строка-блок. Внутри: мониторы,
-/// громкость (с историей), спектр, баланс.
+/// Дашборд: каждая шина — отдельный блок-строка.
+/// Внутри блока (Youlean-стиль): вертикальные метры со шкалой + метрики +
+/// график громкости; ниже — спектр и тональный баланс.
+/// Шины можно перетаскивать за ручку (⠿) для изменения порядка.
 struct DashboardView: View {
     @EnvironmentObject var model: AppModel
 
@@ -44,7 +46,11 @@ struct DashboardView: View {
                                 snapshot: model.busPreview(for: bus),
                                 onDelete: { model.removeBus(id: bus.id) },
                                 onRename: { newName in model.renameBus(id: bus.id, to: newName) },
-                                onEdit: { model.beginEditBus(id: bus.id) }
+                                onEdit: { model.beginEditBus(id: bus.id) },
+                                onMoveUp: { model.moveBusUp(id: bus.id) },
+                                onMoveDown: { model.moveBusDown(id: bus.id) },
+                                canMoveUp: model.buses.first?.id != bus.id,
+                                canMoveDown: model.buses.last?.id != bus.id
                             )
                         }
                     }
@@ -120,7 +126,7 @@ struct SaveSceneSheet: View {
     }
 }
 
-/// Карточка шины: строка-блок.
+/// Карточка шины (Youlean-вёрстка).
 struct BusDashboardCard: View {
     let id: BusID
     let name: String
@@ -129,20 +135,67 @@ struct BusDashboardCard: View {
     let onDelete: () -> Void
     let onRename: (String) -> Void
     var onEdit: () -> Void = {}
+    var onMoveUp: () -> Void = {}
+    var onMoveDown: () -> Void = {}
+    var canMoveUp: Bool = false
+    var canMoveDown: Bool = false
 
+    @EnvironmentObject var model: AppModel
     @State private var isRenaming = false
     @State private var renameText = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
-            channelMeters
+
+            // Верхний ряд: вертикальные метры + метрики + график громкости.
+            HStack(alignment: .top, spacing: 14) {
+                ForEach(channelLabels, id: \.self) { label in
+                    VerticalMeterColumn(
+                        label: label,
+                        snapshot: snapshot?.displayChannels.first { $0.label == label },
+                        showHints: model.showMetricHints
+                    )
+                }
+
+                LoudnessHistoryChart(
+                    history: snapshot?.displayChannels.first?.loudnessHistory ?? [],
+                    target: -23,
+                    windowSeconds: 15
+                )
+                .frame(maxWidth: .infinity)
+                .frame(height: meterColumnHeight)
+            }
+
             Divider()
-            loudnessHistory
-            Divider()
-            spectrumRow
-            Divider()
-            balanceRow
+
+            HStack(alignment: .top, spacing: 14) {
+                // Спектр
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Спектр")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    SpectrumCurveChart(
+                        fine: snapshot?.displayChannels.first?.fineCurve ?? [],
+                        bands: snapshot?.displayChannels.first?.rtaBands ?? []
+                    )
+                    .frame(height: 130)
+                }
+                .frame(maxWidth: .infinity)
+
+                // Баланс
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Тональный баланс")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TonalBalanceChart(
+                        spectrum: snapshot?.displayChannels.first?.spectrum ?? [],
+                        sampleRate: Float(snapshot?.sampleRate ?? 48000)
+                    )
+                    .frame(height: 130)
+                }
+                .frame(maxWidth: .infinity)
+            }
         }
         .padding()
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
@@ -154,8 +207,28 @@ struct BusDashboardCard: View {
         }
     }
 
+    private var meterColumnHeight: CGFloat { 170 }
+
     private var header: some View {
-        HStack {
+        HStack(spacing: 8) {
+            // Ручки перемещения
+            VStack(spacing: 2) {
+                Button(action: onMoveUp) {
+                    Image(systemName: "chevron.up")
+                        .font(.caption2)
+                        .foregroundStyle(canMoveUp ? .primary : .tertiary)
+                }
+                .buttonStyle(.borderless)
+                .disabled(!canMoveUp)
+                Button(action: onMoveDown) {
+                    Image(systemName: "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(canMoveDown ? .primary : .tertiary)
+                }
+                .buttonStyle(.borderless)
+                .disabled(!canMoveDown)
+            }
+
             Text(name)
                 .font(.headline)
             Text(modeLabel)
@@ -190,95 +263,6 @@ struct BusDashboardCard: View {
         }
     }
 
-    /// Мини-мониторы каналов в одну строку.
-    private var channelMeters: some View {
-        HStack(alignment: .top, spacing: 16) {
-            ForEach(channelLabels, id: \.self) { label in
-                let ch = snapshot?.displayChannels.first { $0.label == label }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(label)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    VUMeterView(valueDB: ch?.vuDB ?? -Float.infinity,
-                                peakDB: ch?.peakDB ?? -Float.infinity)
-                    HStack(spacing: 10) {
-                        metric("Peak", ch?.peakDB)
-                        metric("RMS", ch?.rmsDB)
-                        metric("LUFS M", ch?.momentaryLUFS)
-                        metric("LUFS S", ch?.shortTermLUFS)
-                    }
-                }
-            }
-        }
-    }
-
-    /// Бегущий график громкости (Youlean-стиль): momentary + short-term.
-    private var loudnessHistory: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("Громкость (история)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if let integrated = snapshot?.displayChannels.first?.integratedLUFS, integrated.isFinite {
-                    Text(String(format: "Integrated: %.1f LUFS", integrated))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-            }
-            LoudnessHistoryChart(
-                history: snapshot?.displayChannels.first?.loudnessHistory ?? [],
-                target: -23
-            )
-            .frame(height: 80)
-        }
-    }
-
-    private var spectrumRow: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Спектр")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            SpectrumCurveChart(
-                fine: snapshot?.displayChannels.first?.fineCurve ?? [],
-                bands: snapshot?.displayChannels.first?.rtaBands ?? []
-            )
-            .frame(height: 110)
-        }
-    }
-
-    private var balanceRow: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Тональный баланс")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            InstrumentBalanceStrip(
-                spectrum: snapshot?.displayChannels.first?.spectrum ?? [],
-                sampleRate: Float(snapshot?.sampleRate ?? 48000)
-            )
-            if let tips = snapshot?.displayChannels.first, !balanceTips.isEmpty {
-                ForEach(balanceTips, id: \.self) { tip in
-                    HStack(alignment: .top, spacing: 4) {
-                        Image(systemName: "lightbulb")
-                            .font(.caption2)
-                            .foregroundStyle(.yellow)
-                        Text(tip)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-    }
-
-    private var balanceTips: [String] {
-        guard let first = snapshot?.displayChannels.first else { return [] }
-        return InstrumentBalanceAnalyzer(
-            spectrum: first.spectrum,
-            sampleRate: Float(snapshot?.sampleRate ?? 48000)
-        ).tips
-    }
-
     private var channelLabels: [String] {
         if let snapshot, !snapshot.displayChannels.isEmpty {
             return snapshot.displayChannels.map { $0.label }
@@ -295,20 +279,140 @@ struct BusDashboardCard: View {
         case .mono(let ch): return "Моно " + ch.map { "\($0 + 1)" }.joined(separator: "+")
         }
     }
+}
 
-    private func metric(_ title: String, _ value: Float?, suffix: String = " dB") -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
+/// Вертикальный блок одного канала: шкала + метр + числовые метрики.
+struct VerticalMeterColumn: View {
+    let label: String
+    let snapshot: ChannelSnapshot?
+    var showHints: Bool = false
+
+    private let maxDB: Float = 6
+    private let minDB: Float = -60
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            HStack(alignment: .top, spacing: 4) {
+                // Шкала делений
+                ScaleRuler(maxDB: maxDB, minDB: minDB)
+                    .frame(width: 16, height: 140)
+
+                // Вертикальный метр
+                ZStack(alignment: .bottom) {
+                    Capsule()
+                        .fill(Color.black.opacity(0.1))
+                        .frame(width: 14, height: 140)
+                    GeometryReader { geo in
+                        VStack {
+                            Spacer(minLength: 0)
+                            // уровень RMS
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(rmsColor)
+                                .frame(height: levelHeight(rmsDB, in: geo.size.height))
+                                .opacity(0.75)
+                        }
+                    }
+                    .frame(width: 14, height: 140)
+
+                    // RMS-фон, поверх — пиковая насечка
+                    PeakTick(valueDB: snapshot?.peakDB ?? -Float.infinity, maxDB: maxDB, minDB: minDB)
+                        .frame(width: 22, height: 140)
+                }
+                .frame(width: 22, height: 140)
+            }
+
+            // Метрики колонкой
+            VStack(alignment: .leading, spacing: 2) {
+                metricRow("Peak", "пик", snapshot?.peakDB)
+                metricRow("RMS", "среднее", snapshot?.rmsDB)
+                metricRow("TruePk", "ист.пик", snapshot?.truePeakDB)
+                metricRow("M", "момент.", snapshot?.momentaryLUFS)
+                metricRow("S", "3 сек", snapshot?.shortTermLUFS)
+                metricRow("I", "интегр.", snapshot?.integratedLUFS)
+            }
+        }
+    }
+
+    private var rmsDB: Float { snapshot?.rmsDB ?? -Float.infinity }
+    private var rmsColor: Color {
+        let v = rmsDB
+        if !v.isFinite { return .green.opacity(0.3) }
+        if v > -3 { return .red }
+        if v > -9 { return .yellow }
+        return .green
+    }
+
+    private func levelHeight(_ db: Float, in height: CGFloat) -> CGFloat {
+        guard db.isFinite else { return 0 }
+        let clamped = max(minDB, min(maxDB, db))
+        let t = (clamped - minDB) / (maxDB - minDB)
+        return CGFloat(t) * height
+    }
+
+    @ViewBuilder
+    private func metricRow(_ name: String, _ hint: String, _ value: Float?) -> some View {
+        HStack(spacing: 4) {
+            Text(showHints ? "\(name) (\(hint))" : name)
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
+            Spacer()
             if let value, value.isFinite {
-                Text(String(format: "%.1f%@", value, suffix))
-                    .font(.system(size: 11, design: .monospaced).weight(.medium))
+                Text(String(format: "%.1f", value))
+                    .font(.system(size: 10, design: .monospaced).weight(.medium))
             } else {
                 Text("--")
-                    .font(.system(size: 11, design: .monospaced).weight(.medium))
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.tertiary)
             }
         }
+    }
+}
+
+/// Вертикальная шкала с делениями.
+struct ScaleRuler: View {
+    let maxDB: Float
+    let minDB: Float
+
+    var body: some View {
+        GeometryReader { geo in
+            Canvas { context, size in
+                for db in stride(from: maxDB, through: minDB, by: -12) {
+                    let t = (maxDB - db) / (maxDB - minDB)
+                    let y = CGFloat(t) * size.height
+                    var tick = Path()
+                    tick.move(to: CGPoint(x: size.width - 4, y: y))
+                    tick.addLine(to: CGPoint(x: size.width, y: y))
+                    context.stroke(tick, with: .color(.secondary.opacity(0.6)), lineWidth: 1)
+                    if db != maxDB {
+                        let text = Text("\(Int(db))").font(.system(size: 7)).foregroundStyle(.tertiary)
+                        context.draw(text, at: CGPoint(x: 0, y: y - 4), anchor: .topLeading)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Пиковая насечка на вертикальном метре.
+struct PeakTick: View {
+    let valueDB: Float
+    let maxDB: Float
+    let minDB: Float
+
+    var body: some View {
+        GeometryReader { geo in
+            let clamped = max(minDB, min(maxDB, valueDB.isFinite ? valueDB : minDB))
+            let t = CGFloat((clamped - minDB) / (maxDB - minDB))
+            let y = geo.size.height * (1 - t)
+            Rectangle()
+                .fill(valueDB > maxDB - 1 ? Color.red : Color.black.opacity(0.8))
+                .frame(height: 2)
+                .offset(y: y)
+        }
+        .allowsHitTesting(false)
     }
 }

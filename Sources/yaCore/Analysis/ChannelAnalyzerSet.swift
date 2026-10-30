@@ -48,6 +48,11 @@ public final class ChannelAnalyzerSet {
         rtaFineCurve = rta.fineCurve
     }
 
+    /// Применяет новые настройки RTA немедленно (без пересоздания).
+    public func applyRTASettings(_ settings: RTASettings) {
+        rta.updateSettings(settings)
+    }
+
     public func snapshot() -> ChannelSnapshot {
         snapshot(label: self.label)
     }

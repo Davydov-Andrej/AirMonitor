@@ -64,11 +64,13 @@ struct ChannelMeterCard: View {
             VUMeterView(valueDB: snapshot.vuDB, peakDB: snapshot.peakDB)
 
             HStack(spacing: 12) {
-                metric("Peak", snapshot.peakDB)
-                metric("RMS", snapshot.rmsDB)
-                metric("TruePeak", snapshot.truePeakDB)
-                metric("Crest", snapshot.crestFactorDB, suffix: " dB")
-                metric("Integr.", snapshot.integratedLUFS, suffix: " LU")
+                metric("Peak", "пик", snapshot.peakDB)
+                metric("RMS", "среднеквадр.", snapshot.rmsDB)
+                metric("TruePeak", "истинный пик", snapshot.truePeakDB)
+                metric("Crest", "динамика", snapshot.crestFactorDB, suffix: " dB")
+                metric("M", "громкость 400 мс", snapshot.momentaryLUFS, suffix: " LU")
+                metric("S", "громкость 3 с", snapshot.shortTermLUFS, suffix: " LU")
+                metric("I", "громкость эфира", snapshot.integratedLUFS, suffix: " LU")
             }
 
             LoudnessHistoryChart(history: snapshot.loudnessHistory, target: -23)
@@ -78,9 +80,9 @@ struct ChannelMeterCard: View {
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.03)))
     }
 
-    private func metric(_ name: String, _ value: Float, suffix: String = " dB") -> some View {
+    private func metric(_ name: String, _ hint: String, _ value: Float, suffix: String = " dB") -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(name)
+            Text("\(name) (\(hint))")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             Text(value.isFinite ? String(format: "%.1f%@", value, suffix) : "--")

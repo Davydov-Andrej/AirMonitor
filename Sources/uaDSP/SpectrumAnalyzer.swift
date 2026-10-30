@@ -54,8 +54,8 @@ public struct RTASettings: Sendable {
 
     public init(
         bandsPerOctave: Int = 3,
-        attack: Float = 0.55,
-        release: Float = 0.02,
+        attack: Float = 0.8,
+        release: Float = 0.08,
         peakHoldSeconds: Float = 1.5,
         showFineCurve: Bool = true
     ) {
@@ -67,6 +67,14 @@ public struct RTASettings: Sendable {
     }
 
     public static let `default` = RTASettings()
+
+    /// Пресеты скорости отклика (как Peak/Slow Average на пультах).
+    public static let presets: [(name: String, settings: RTASettings)] = [
+        ("Пики (мгновенно)", RTASettings(bandsPerOctave: 3, attack: 0.95, release: 0.4, peakHoldSeconds: 1.5, showFineCurve: true)),
+        ("Быстрый (по умолчанию)", RTASettings(bandsPerOctave: 3, attack: 0.8, release: 0.08, peakHoldSeconds: 1.5, showFineCurve: true)),
+        ("Средний", RTASettings(bandsPerOctave: 3, attack: 0.4, release: 0.03, peakHoldSeconds: 2.0, showFineCurve: true)),
+        ("Медленный (усреднение)", RTASettings(bandsPerOctave: 3, attack: 0.15, release: 0.01, peakHoldSeconds: 3.0, showFineCurve: false)),
+    ]
 }
 
 /// Real-Time Analyzer в духе микшерных пультов и Room EQ Wizard:
