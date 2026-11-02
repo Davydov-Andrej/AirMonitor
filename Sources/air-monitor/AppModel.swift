@@ -377,25 +377,46 @@ final class AppModel: ObservableObject {
             }
         }
 
-        var ok = true
-        for bus in buses {
-            if !publisher.addBus(bus.config) {
-                ok = false
-                errorMessage = "Не удалось подключиться к каналам «\(bus.config.name)»"
+        // Старт AUHAL блокирует main на ~1-2 с (AudioDeviceCreateIOProcID внутри
+        // драйвера устройства синхронный) — вся инициализация на фоновой очереди,
+        // UI остаётся живым.
+        isCapturing = true  // сразу показываем состояние (кнопка/индикатор)
+        errorMessage = nil
+
+        let busesToStart = buses.map { $0.config }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            var ok = true
+            var failureMessage: String?
+            for config in busesToStart {
+                if !publisher.addBus(config) {
+                    ok = false
+                    failureMessage = "Не удалось подключиться к каналам «\(config.name)»"
+                    break
+                }
+            }
+            var startError: AudioError?
+            if ok {
+                startError = publisher.start()
+            }
+
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let failureMessage {
+                    self.errorMessage = failureMessage
+                    self.isCapturing = false
+                } else if let startError {
+                    self.errorMessage = startError.localizedDescription
+                    self.isCapturing = false
+                } else {
+                    self.publisher = publisher
+                    self.isCapturing = true
+                    self.errorMessage = nil
+                    self.syncBusOrder()
+                    EngineLog.log("startCapture: шин \(busesToStart.count) (фоновый старт)")
+                }
             }
         }
-        guard ok else { return }
-
-        if let error = publisher.start() {
-            errorMessage = error.localizedDescription
-            return
-        }
-
-        self.publisher = publisher
-        isCapturing = true
-        errorMessage = nil
-        syncBusOrder()
-        EngineLog.log("startCapture: шин \(buses.count)")
     }
 
     /// Порядок шин последнего снапшота (сравнение из DSP-потока, Guarded by holdersLock не требуется — записывается только тут).

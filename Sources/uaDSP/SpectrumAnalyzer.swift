@@ -1,7 +1,7 @@
 import Foundation
 import Accelerate
 
-public struct SpectrumPoint: Identifiable, Sendable {
+public struct SpectrumPoint: Identifiable, Sendable, Equatable {
     public let id: Int
     public let frequency: Float
     public let magnitudeDB: Float

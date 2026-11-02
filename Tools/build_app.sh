@@ -50,7 +50,14 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null 2>&1 || true
+# Adhoc-подпись со СТАБИЛЬНЫМ designated requirement (identifier-based):
+# TCC привязывает mic-разрешение к подписи. Дефолтный adhoc DR = конкретный
+# cdhash (меняется каждый билд) -> macOS считал приложение "новым" и сбрасывал
+# разрешение. Identifier-based DR переживает любые пересборки.
+codesign --force --deep --sign - \
+    --identifier com.airmonitor.app \
+    --requirements '=designated => identifier "com.airmonitor.app"' \
+    "$APP_BUNDLE" >/dev/null 2>&1 || true
 
 echo "==> Готово: $APP_BUNDLE"
 echo "    (бандл обновлён на месте — mic-разрешение TCC сохраняется)"

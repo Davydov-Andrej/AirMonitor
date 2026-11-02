@@ -245,12 +245,25 @@ struct TonalBalanceChart: View {
 
     private let spanDB: Float = 40  // окно отображения ±20 дБ вокруг среднего
 
+    // Кэш расчёта: analyzer создаётся только когда спектр реально изменился,
+    // а не на каждый тик TimelineView (20/с).
+    @State private var cachedSpectrum: [SpectrumPoint] = []
+    @State private var cachedBalances: [InstrumentBalance] = []
+    @State private var cachedHasSignal = false
+
     var body: some View {
-        let analyzer = InstrumentBalanceAnalyzer(spectrum: spectrum, sampleRate: sampleRate)
-        let balances = analyzer.balances()
+        let needRecompute = spectrum != cachedSpectrum
+        let analyzer = needRecompute ? InstrumentBalanceAnalyzer(spectrum: spectrum, sampleRate: sampleRate) : nil
+        let balances = needRecompute ? (analyzer?.balances() ?? []) : cachedBalances
+        let hasSignal = needRecompute ? (analyzer?.hasSignal ?? false) : cachedHasSignal
+        let _ = needRecompute ? DispatchQueue.main.async {
+            cachedSpectrum = spectrum
+            cachedBalances = balances
+            cachedHasSignal = hasSignal
+        } : ()
 
         Canvas { context, size in
-            guard !balances.isEmpty, analyzer.hasSignal else {
+            guard !balances.isEmpty, hasSignal else {
                 let text = Text("нет сигнала").font(.system(size: 9)).foregroundStyle(.tertiary)
                 context.draw(text, at: CGPoint(x: size.width / 2, y: size.height / 2))
                 return
