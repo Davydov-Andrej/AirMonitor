@@ -11,12 +11,16 @@ enum CGChart {
     // MARK: - Спектр (АЧХ)
 
     static func spectrumDrawer(holder: BusSnapshotHolder) -> (CGContext, CGSize) -> Void {
-        let snapshot = holder.snapshot
-        let channel = snapshot?.mono ?? snapshot?.channels.first
-        return spectrumDrawer(fine: channel?.fineCurve ?? [], bands: channel?.rtaBands ?? [])
+        // Данные резолвятся КАЖДЫЙ кадр: holder живой, snapshot обновляется DSP-потоком.
+        let drawer = spectrumDrawerBuilder()
+        return { ctx, size in
+            let snapshot = holder.snapshot
+            let channel = snapshot?.mono ?? snapshot?.channels.first
+            drawer(ctx, size, channel?.fineCurve ?? [], channel?.rtaBands ?? [])
+        }
     }
 
-    static func spectrumDrawer(fine: [SpectrumPoint], bands: [RTABand]) -> (CGContext, CGSize) -> Void {
+    static func spectrumDrawerBuilder() -> (CGContext, CGSize, [SpectrumPoint], [RTABand]) -> Void {
         let minDB: Float = -90
         let maxDB: Float = 10
         let dbLabels = [10, -2, -14, -26, -38, -50, -62, -74, -86]
@@ -33,7 +37,7 @@ enum CGChart {
             return height * (1 - CGFloat(max(0, min(1, t))))
         }
 
-        return { ctx, size in
+        return { ctx, size, fine, bands in
             let labelAttrs: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 8),
                 .foregroundColor: NSColor.secondaryLabelColor,
@@ -93,24 +97,18 @@ enum CGChart {
     // MARK: - Громкость (история)
 
     static func loudnessDrawer(holder: BusSnapshotHolder, isStereo: Bool) -> (CGContext, CGSize) -> Void {
-        let snapshot = holder.snapshot
-        let mono = isStereo ? (snapshot?.mono ?? snapshot?.channels.first) : snapshot?.channels.first
-        return loudnessDrawer(
-            monoHistory: mono?.loudnessHistory ?? [],
-            leftHistory: isStereo ? snapshot?.channels.first?.loudnessHistory ?? [] : [],
-            rightHistory: isStereo ? snapshot?.channels.dropFirst().first?.loudnessHistory ?? [] : [],
-            target: -23,
-            windowSeconds: 15
-        )
+        let inner = loudnessDrawerBuilder()
+        return { ctx, size in
+            let snapshot = holder.snapshot
+            let mono = isStereo ? (snapshot?.mono ?? snapshot?.channels.first) : snapshot?.channels.first
+            inner(ctx, size,
+                  mono?.loudnessHistory ?? [],
+                  isStereo ? snapshot?.channels.first?.loudnessHistory ?? [] : [],
+                  isStereo ? snapshot?.channels.dropFirst().first?.loudnessHistory ?? [] : [])
+        }
     }
 
-    static func loudnessDrawer(
-        monoHistory: [LoudnessMeter.HistoryPoint],
-        leftHistory: [LoudnessMeter.HistoryPoint],
-        rightHistory: [LoudnessMeter.HistoryPoint],
-        target: Float,
-        windowSeconds: Double
-    ) -> (CGContext, CGSize) -> Void {
+    static func loudnessDrawerBuilder() -> (CGContext, CGSize, [LoudnessMeter.HistoryPoint], [LoudnessMeter.HistoryPoint], [LoudnessMeter.HistoryPoint]) -> Void {
         let minLU: Float = -40
         let maxLU: Float = 0
         let stepHz = 10.0
@@ -147,7 +145,9 @@ enum CGChart {
             return path
         }
 
-        return { ctx, size in
+        return { ctx, size, monoHistory, leftHistory, rightHistory in
+            let target: Float = -23
+            let windowSeconds: Double = 15
             let labelAttrs: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 8),
                 .foregroundColor: NSColor.secondaryLabelColor,
@@ -204,15 +204,15 @@ enum CGChart {
     // MARK: - Тональный баланс
 
     static func balanceDrawer(holder: BusSnapshotHolder) -> (CGContext, CGSize) -> Void {
-        let snapshot = holder.snapshot
-        let channel = snapshot?.mono ?? snapshot?.channels.first
-        return balanceDrawer(
-            balances: channel?.tonalBalances ?? [],
-            hasSignal: channel?.tonalBalances.isEmpty == false
-        )
+        let inner = balanceDrawerBuilder()
+        return { ctx, size in
+            let snapshot = holder.snapshot
+            let channel = snapshot?.mono ?? snapshot?.channels.first
+            inner(ctx, size, channel?.tonalBalances ?? [], channel?.tonalBalances.isEmpty == false)
+        }
     }
 
-    static func balanceDrawer(balances: [InstrumentBalance], hasSignal: Bool) -> (CGContext, CGSize) -> Void {
+    static func balanceDrawerBuilder() -> (CGContext, CGSize, [InstrumentBalance], Bool) -> Void {
         let spanDB: Float = 40
 
         func yPos(_ db: Float, height: CGFloat) -> CGFloat {
@@ -220,11 +220,11 @@ enum CGChart {
             return height * (1 - CGFloat(max(0, min(1, t)))) * 0.92 + height * 0.04
         }
 
-        let labelAttrs0: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 9),
-            .foregroundColor: NSColor.tertiaryLabelColor,
-        ]
-        return { ctx, size in
+        return { ctx, size, balances, hasSignal in
+            let labelAttrs0: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 9),
+                .foregroundColor: NSColor.tertiaryLabelColor,
+            ]
             guard !balances.isEmpty, hasSignal else {
                 drawText(NSAttributedString(string: "нет сигнала", attributes: labelAttrs0),
                          at: CGPoint(x: size.width / 2 - 30, y: size.height / 2), height: size.height)
