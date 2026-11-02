@@ -42,9 +42,15 @@ public final class VUMeter {
 
         if rms > statePeak {
             statePeak = rms
+            peakLastSeen = Date().timeIntervalSinceReferenceDate
         }
         peak = 20 * log10(max(statePeak, 1e-9))
-        peakLastSeen = Date().timeIntervalSinceReferenceDate
+
+        // Пик-холд с затуханием: после 1.5 с простоя плавно опускается.
+        let elapsed = Date().timeIntervalSinceReferenceDate - peakLastSeen
+        if elapsed > 1.5 && statePeak > 0 {
+            statePeak *= 0.985  // ~-0.13 дБ/тик при 10-15 Гц обновления
+        }
     }
 
     public func resetHold() {

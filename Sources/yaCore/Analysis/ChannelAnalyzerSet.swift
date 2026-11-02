@@ -75,13 +75,13 @@ public final class ChannelAnalyzerSet {
             id: channelIndex,
             label: label,
             peakDB: profile.peakDBFS,
-            rmsDB: profile.rmsDBFS,
+            rmsDB: profile.fastRMS,  // живой RMS для заливки метра
             vuDB: vu.value,
             truePeakDB: profile.truePeakDBTP,
             crestFactorDB: profile.crestFactorDB,
             momentaryLUFS: reading.momentaryLUFS,
             shortTermLUFS: reading.shortTermLUFS,
-            spectrum: lastSpectrum,
+            spectrum: [],  // выводится из rtaBands (дубликат убран)
             rtaBands: rtaBands,
             fineCurve: rtaFineCurve,
             loudnessHistory: history,

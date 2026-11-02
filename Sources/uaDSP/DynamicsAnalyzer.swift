@@ -5,6 +5,8 @@ import Accelerate
 public struct DynamicProfile {
     public let peakDBFS: Float
     public let rmsDBFS: Float
+    /// Живой короткий RMS (~100 мс) — для заливки метра.
+    public let fastRMS: Float
     public let crestFactorDB: Float
     public let truePeakDBTP: Float
     public let peakCount: Int
@@ -21,6 +23,10 @@ public final class DynamicsAnalyzer {
     public private(set) var truePeak: Float = MeterFloor.dB
     public private(set) var clipCount: Int = 0
 
+    /// Короткий RMS (для заливки метра): ~100 мс интеграция.
+    public private(set) var fastRMS: Float = MeterFloor.dB
+    private var fastState: Float = 0
+
     private var runningSumSquares: Double = 0
     private var runningCount: Int = 0
 
@@ -33,6 +39,13 @@ public final class DynamicsAnalyzer {
         vDSP_svesq(samples, 1, &sumSquares, vDSP_Length(samples.count))
         runningSumSquares += Double(sumSquares)
         runningCount += samples.count
+
+        // Быстрый RMS с атакой/спадом ~100 мс — живой уровень метра.
+        let rms = sqrtf(sumSquares / Float(samples.count))
+        let dt = Float(samples.count) / 48000.0  // приблизительно; точность не критична
+        let alpha = rms > fastState ? expf(-dt / 0.03) : expf(-dt / 0.15)
+        fastState = alpha * fastState + (1 - alpha) * rms
+        fastRMS = 20 * log10(max(fastState, 1e-9))
 
         var localPeak: Float = 0
         vDSP_maxmgv(samples, 1, &localPeak, vDSP_Length(samples.count))
@@ -59,6 +72,7 @@ public final class DynamicsAnalyzer {
         DynamicProfile(
             peakDBFS: peak,
             rmsDBFS: rmsLevel,
+            fastRMS: fastRMS,
             crestFactorDB: peak.isFinite && rmsLevel.isFinite ? peak - rmsLevel : 0,
             truePeakDBTP: truePeak,
             peakCount: clipCount

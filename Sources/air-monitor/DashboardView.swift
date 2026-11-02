@@ -246,7 +246,7 @@ struct BusDashboardCard: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         TonalBalanceChart(
-                            spectrum: summaryChannel?.spectrum ?? [],
+                            spectrum: summaryChannel?.rtaBands.map { SpectrumPoint(id: $0.id, frequency: $0.centerFrequency, magnitudeDB: $0.levelDB) } ?? [],
                             sampleRate: Float(snapshot?.sampleRate ?? 48000)
                         )
                         .frame(height: 130)

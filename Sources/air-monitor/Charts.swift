@@ -70,32 +70,56 @@ struct LoudnessHistoryChart: View {
         let offset = CGFloat(capacity - points.count)
 
         if fill {
-            var path = Path()
-            path.move(to: CGPoint(x: size.width, y: size.height))
-            var anyFinite = false
-            for (i, p) in points.enumerated() {
-                guard p.shortTerm.isFinite else { continue }
-                path.addLine(to: CGPoint(x: (offset + CGFloat(i)) * stepX, y: yPos(p.shortTerm, size: size)))
-                anyFinite = true
+            // Заливка только по непрерывным участкам (дыры −∞ разрывают путь).
+            var segments: [[(Int, Float)]] = []
+            var current: [(Int, Float)] = []
+            for (i, p) in points.enumerated() where p.shortTerm.isFinite {
+                if let last = current.last, i > last.0 + 1, !current.isEmpty {
+                    segments.append(current)
+                    current = []
+                }
+                current.append((i, p.shortTerm))
             }
-            guard anyFinite else { return }
-            path.addLine(to: CGPoint(x: (offset + CGFloat(points.count - 1)) * stepX, y: size.height))
-            path.closeSubpath()
-            context.fill(path, with: .color(color.opacity(0.16)))
+            if !current.isEmpty { segments.append(current) }
+
+            for segment in segments {
+                guard segment.count > 1 else { continue }
+                var path = Path()
+                for (j, pt) in segment.enumerated() {
+                    let x = (offset + CGFloat(pt.0)) * stepX
+                    let y = yPos(pt.1, size: size)
+                    if j == 0 {
+                        path.move(to: CGPoint(x: x, y: size.height))
+                        path.addLine(to: CGPoint(x: x, y: y))
+                    } else {
+                        path.addLine(to: CGPoint(x: x, y: y))
+                    }
+                }
+                let lastX = (offset + CGFloat(segment.last!.0)) * stepX
+                path.addLine(to: CGPoint(x: lastX, y: size.height))
+                path.closeSubpath()
+                context.fill(path, with: .color(color.opacity(0.16)))
+            }
         }
 
+        // Линия: разрывается на дырах (−∞), не соединяет через них.
         var line = Path()
         var started = false
+        var lastIdx = -10
         for (i, p) in points.enumerated() {
-            guard p.momentary.isFinite else { continue }
+            guard p.momentary.isFinite else {
+                started = false
+                continue
+            }
             let x = (offset + CGFloat(i)) * stepX
             let y = yPos(p.momentary, size: size)
-            if started {
-                line.addLine(to: CGPoint(x: x, y: y))
-            } else {
+            if !started || i > lastIdx + 1 {
                 line.move(to: CGPoint(x: x, y: y))
                 started = true
+            } else {
+                line.addLine(to: CGPoint(x: x, y: y))
             }
+            lastIdx = i
         }
         if started {
             context.stroke(line, with: .color(color), style: StrokeStyle(lineWidth: lineWidth, lineJoin: .round))
@@ -173,7 +197,6 @@ struct SpectrumCurveChart: View {
                 context.stroke(path, with: .color(.accentColor), style: StrokeStyle(lineWidth: 1.6, lineJoin: .round))
             }
         }
-        .drawingGroup()
         .background(Color.black.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
