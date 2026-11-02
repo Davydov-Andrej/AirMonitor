@@ -37,6 +37,12 @@ public final class LoudnessMeter {
         public let momentary: Float
         public let shortTerm: Float
         public let peak: Float
+
+        public init(momentary: Float, shortTerm: Float, peak: Float) {
+            self.momentary = momentary
+            self.shortTerm = shortTerm
+            self.peak = peak
+        }
     }
 
     private let sampleRate: Double

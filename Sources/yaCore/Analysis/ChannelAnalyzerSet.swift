@@ -16,6 +16,7 @@ public final class ChannelAnalyzerSet {
     public private(set) var lastSpectrum: [SpectrumPoint] = []
     public private(set) var rtaBands: [RTABand] = []
     public private(set) var rtaFineCurve: [SpectrumPoint] = []
+    private var lastSpectrumDirty = false
 
     public init(channelIndex: Int, sampleRate: Float, fftLength: Int, windowType: FFT.WindowType = .hann) {
         self.channelIndex = channelIndex
@@ -43,14 +44,14 @@ public final class ChannelAnalyzerSet {
         dynamics.process(samples)
         loudness.process(samples)
         rta.process(samples)
-        lastSpectrum = rta.spectrumPoints()
-        rtaBands = rta.bands
-        rtaFineCurve = rta.fineCurve
+        // Полосы/кривая собираются лениво — в snapshot().
+        lastSpectrumDirty = true
     }
 
     /// Применяет новые настройки RTA немедленно (без пересоздания).
     public func applyRTASettings(_ settings: RTASettings) {
         rta.updateSettings(settings)
+        lastSpectrumDirty = true
     }
 
     public func snapshot() -> ChannelSnapshot {
@@ -58,9 +59,18 @@ public final class ChannelAnalyzerSet {
     }
 
     public func snapshot(label: String) -> ChannelSnapshot {
+        if lastSpectrumDirty {
+            let data = rta.snapshotData()
+            rtaBands = data.bands
+            rtaFineCurve = data.fine
+            lastSpectrum = data.bands.map {
+                SpectrumPoint(id: $0.id, frequency: $0.centerFrequency, magnitudeDB: $0.levelDB)
+            }
+            lastSpectrumDirty = false
+        }
         let reading = loudness.reading()
         let profile = dynamics.profile()
-        let history = loudness.history
+        let history = loudness.historySnapshot()
         return ChannelSnapshot(
             id: channelIndex,
             label: label,

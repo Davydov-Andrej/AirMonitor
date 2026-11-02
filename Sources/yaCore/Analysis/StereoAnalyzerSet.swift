@@ -60,12 +60,10 @@ public final class StereoAnalyzerSet {
         let n = min(left.count, right.count)
         guard n > 0 else { return }
 
-        var mid = [Float](repeating: 0, count: n)
         var productSum: Float = 0
         var leftSq: Float = 0
         var rightSq: Float = 0
         for i in 0..<n {
-            mid[i] = (left[i] + right[i]) * 0.5
             productSum += left[i] * right[i]
             leftSq += left[i] * left[i]
             rightSq += right[i] * right[i]
@@ -76,7 +74,8 @@ public final class StereoAnalyzerSet {
             correlation = productSum / denom
         }
 
-        monoAnalyzer.process(mid, sampleRate: sampleRate)
+        // Оптимизация: только 2 FFT (L и R). Суммарные метрики (mono/M/S/I)
+        // вычисляются в snapshot() арифметически из L/R — третий FFT не нужен.
         leftAnalyzer.process(left, sampleRate: sampleRate)
         rightAnalyzer.process(right, sampleRate: sampleRate)
 
@@ -84,9 +83,73 @@ public final class StereoAnalyzerSet {
     }
 
     public func snapshot() -> (mono: ChannelSnapshot, left: ChannelSnapshot, right: ChannelSnapshot, correlation: Float) {
-        let m = monoAnalyzer.snapshot(label: "Стерео (L+R)")
         let l = leftAnalyzer.snapshot(label: "L \(leftChannelIndex + 1)")
         let r = rightAnalyzer.snapshot(label: "R \(rightChannelIndex + 1)")
+        let m = Self.monoSnapshot(from: l, r)
         return (m, l, r, correlation)
+    }
+
+    /// Суммарный (stereo) снимок: громкости по энергетическому среднему L/R,
+    /// спектр — суммарная энергия полос. Без третьего FFT.
+    private static func monoSnapshot(from l: ChannelSnapshot, _ r: ChannelSnapshot) -> ChannelSnapshot {
+        func energyAvg(_ a: Float, _ b: Float) -> Float {
+            guard a.isFinite, b.isFinite else { return max(a.isFinite ? a : b, b.isFinite ? b : -Float.infinity) }
+            return 10 * log10((powf(10, a / 10) + powf(10, b / 10)) / 2)
+        }
+        func ampAvg(_ a: Float, _ b: Float) -> Float {
+            guard a.isFinite, b.isFinite else { return max(a.isFinite ? a : b, b.isFinite ? b : -Float.infinity) }
+            return 20 * log10((powf(10, a / 20) + powf(10, b / 20)) / 2)
+        }
+
+        // Спектр: энергия полос L+R.
+        var bands: [RTABand] = []
+        for (lb, rb) in zip(l.rtaBands, r.rtaBands) {
+            let level = energyAvg(lb.levelDB, rb.levelDB)
+            let peak = max(lb.peakDB, rb.peakDB)
+            bands.append(RTABand(
+                id: lb.id,
+                centerFrequency: lb.centerFrequency,
+                lowerFrequency: lb.lowerFrequency,
+                upperFrequency: lb.upperFrequency,
+                levelDB: level,
+                peakDB: peak
+            ))
+        }
+        var fine: [SpectrumPoint] = []
+        for (lf, rf) in zip(l.fineCurve, r.fineCurve) {
+            fine.append(SpectrumPoint(id: lf.id, frequency: lf.frequency, magnitudeDB: energyAvg(lf.magnitudeDB, rf.magnitudeDB)))
+        }
+        // Спектр для баланса: энергия полос L+R.
+        var balanceSpectrum: [SpectrumPoint] = []
+        for (ls, rs) in zip(l.spectrum, r.spectrum) {
+            balanceSpectrum.append(SpectrumPoint(id: ls.id, frequency: ls.frequency, magnitudeDB: energyAvg(ls.magnitudeDB, rs.magnitudeDB)))
+        }
+
+        var history: [LoudnessMeter.HistoryPoint] = []
+        for (lh, rh) in zip(l.loudnessHistory, r.loudnessHistory) {
+            history.append(LoudnessMeter.HistoryPoint(
+                momentary: energyAvg(lh.momentary, rh.momentary),
+                shortTerm: energyAvg(lh.shortTerm, rh.shortTerm),
+                peak: max(lh.peak, rh.peak)
+            ))
+        }
+
+        return ChannelSnapshot(
+            id: -1,
+            label: "Стерео",
+            peakDB: max(l.peakDB, r.peakDB),
+            rmsDB: energyAvg(l.rmsDB, r.rmsDB),
+            vuDB: ampAvg(l.vuDB, r.vuDB),
+            truePeakDB: max(l.truePeakDB, r.truePeakDB),
+            crestFactorDB: max(l.crestFactorDB, r.crestFactorDB),
+            momentaryLUFS: energyAvg(l.momentaryLUFS, r.momentaryLUFS),
+            shortTermLUFS: energyAvg(l.shortTermLUFS, r.shortTermLUFS),
+            spectrum: balanceSpectrum,
+            rtaBands: bands,
+            fineCurve: fine,
+            loudnessHistory: history,
+            integratedLUFS: energyAvg(l.integratedLUFS, r.integratedLUFS),
+            loudnessRangeLU: max(l.loudnessRangeLU, r.loudnessRangeLU)
+        )
     }
 }

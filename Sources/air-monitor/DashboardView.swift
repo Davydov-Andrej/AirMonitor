@@ -148,23 +148,21 @@ struct BusDashboardCard: View {
         VStack(alignment: .leading, spacing: 10) {
             header
 
-            // Верхний ряд: вертикальные метры + метрики + график громкости.
+            // Верхний ряд: метр(ы) + метрики + график громкости.
+            // Ширина подстраивается: моно — компактно, стерео — чуть шире.
             HStack(alignment: .top, spacing: 14) {
-                ForEach(channelLabels, id: \.self) { label in
-                    VerticalMeterColumn(
-                        label: label,
-                        snapshot: snapshot?.displayChannels.first { $0.label == label },
-                        showHints: model.showMetricHints
-                    )
-                }
+                meterBlock
+                    .fixedSize()
 
                 LoudnessHistoryChart(
-                    history: snapshot?.displayChannels.first?.loudnessHistory ?? [],
+                    monoHistory: summaryChannel?.loudnessHistory ?? [],
+                    leftHistory: isStereo ? leftChannel?.loudnessHistory ?? [] : [],
+                    rightHistory: isStereo ? rightChannel?.loudnessHistory ?? [] : [],
                     target: -23,
                     windowSeconds: 15
                 )
                 .frame(maxWidth: .infinity)
-                .frame(height: meterColumnHeight)
+                .frame(height: 150)
             }
 
             Divider()
@@ -176,8 +174,8 @@ struct BusDashboardCard: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     SpectrumCurveChart(
-                        fine: snapshot?.displayChannels.first?.fineCurve ?? [],
-                        bands: snapshot?.displayChannels.first?.rtaBands ?? []
+                        fine: summaryChannel?.fineCurve ?? [],
+                        bands: summaryChannel?.rtaBands ?? []
                     )
                     .frame(height: 130)
                 }
@@ -189,7 +187,7 @@ struct BusDashboardCard: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     TonalBalanceChart(
-                        spectrum: snapshot?.displayChannels.first?.spectrum ?? [],
+                        spectrum: summaryChannel?.spectrum ?? [],
                         sampleRate: Float(snapshot?.sampleRate ?? 48000)
                     )
                     .frame(height: 130)
@@ -207,11 +205,70 @@ struct BusDashboardCard: View {
         }
     }
 
-    private var meterColumnHeight: CGFloat { 170 }
+    // MARK: - Доступ к каналам
+
+    private var isStereo: Bool {
+        if case .stereo = mode { return true }
+        return false
+    }
+
+    /// Сводный канал: для стерео — «Стерео», для моно — единственный.
+    private var summaryChannel: ChannelSnapshot? {
+        guard let snapshot else { return nil }
+        if isStereo {
+            return snapshot.mono ?? snapshot.channels.first
+        }
+        return snapshot.channels.first
+    }
+
+    private var leftChannel: ChannelSnapshot? {
+        guard let snapshot, isStereo else { return nil }
+        return snapshot.channels.first
+    }
+
+    private var rightChannel: ChannelSnapshot? {
+        guard let snapshot, isStereo else { return nil }
+        return snapshot.channels.dropFirst().first
+    }
+
+    // MARK: - Метр
+
+    /// Метры: моно — один столбик; стерео — два смежных (L/R) в одной рамке.
+    @ViewBuilder
+    private var meterBlock: some View {
+        if isStereo {
+            HStack(alignment: .top, spacing: 10) {
+                StereoMeterPair(
+                    left: leftChannel,
+                    right: rightChannel
+                )
+                MetricsColumn(
+                    title: "Стерео",
+                    snapshot: summaryChannel,
+                    showHints: model.showMetricHints,
+                    extraMetrics: [
+                        ("Crest", "динамика", summaryChannel?.crestFactorDB),
+                        ("Корр.", "L/R", snapshot?.correlation),
+                    ]
+                )
+            }
+        } else {
+            HStack(alignment: .top, spacing: 10) {
+                SingleMeter(snapshot: summaryChannel)
+                MetricsColumn(
+                    title: summaryChannel.map { String($0.label.suffix(2)).trimmingCharacters(in: .whitespaces) } ?? "",
+                    snapshot: summaryChannel,
+                    showHints: model.showMetricHints,
+                    extraMetrics: [("Crest", "динамика", summaryChannel?.crestFactorDB)]
+                )
+            }
+        }
+    }
+
+    private var meterColumnHeight: CGFloat { 150 }
 
     private var header: some View {
         HStack(spacing: 8) {
-            // Ручки перемещения
             VStack(spacing: 2) {
                 Button(action: onMoveUp) {
                     Image(systemName: "chevron.up")
@@ -243,11 +300,6 @@ struct BusDashboardCard: View {
                     .foregroundStyle(.orange)
             }
             Spacer()
-            if let correlation = snapshot?.correlation {
-                Text(String(format: "Кор: %.2f", correlation))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(correlation > 0.7 ? .green : (correlation > 0.3 ? .orange : .red))
-            }
             Menu {
                 Button("Переименовать") {
                     renameText = name
@@ -263,16 +315,6 @@ struct BusDashboardCard: View {
         }
     }
 
-    private var channelLabels: [String] {
-        if let snapshot, !snapshot.displayChannels.isEmpty {
-            return snapshot.displayChannels.map { $0.label }
-        }
-        switch mode {
-        case .stereo(let l, let r): return ["L \(l + 1)", "R \(r + 1)"]
-        case .mono(let ch): return ch.map { "Ch \($0 + 1)" }
-        }
-    }
-
     private var modeLabel: String {
         switch mode {
         case .stereo(let l, let r): return "Стерео \(l + 1)/\(r + 1)"
@@ -281,76 +323,128 @@ struct BusDashboardCard: View {
     }
 }
 
-/// Вертикальный блок одного канала: шкала + метр + числовые метрики.
-struct VerticalMeterColumn: View {
-    let label: String
-    let snapshot: ChannelSnapshot?
-    var showHints: Bool = false
+// MARK: - Метры
 
-    private let maxDB: Float = 6
-    private let minDB: Float = -60
+let meterHeight: CGFloat = 150
+let meterMaxDB: Float = 6
+let meterMinDB: Float = -60
+
+/// Один вертикальный метр с RMS-заливкой и пиковой насечкой.
+struct SingleMeter: View {
+    let snapshot: ChannelSnapshot?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            HStack(alignment: .top, spacing: 4) {
-                // Шкала делений
-                ScaleRuler(maxDB: maxDB, minDB: minDB)
-                    .frame(width: 16, height: 140)
-
-                // Вертикальный метр
-                ZStack(alignment: .bottom) {
-                    Capsule()
-                        .fill(Color.black.opacity(0.1))
-                        .frame(width: 14, height: 140)
-                    GeometryReader { geo in
-                        VStack {
-                            Spacer(minLength: 0)
-                            // уровень RMS
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(rmsColor)
-                                .frame(height: levelHeight(rmsDB, in: geo.size.height))
-                                .opacity(0.75)
-                        }
-                    }
-                    .frame(width: 14, height: 140)
-
-                    // RMS-фон, поверх — пиковая насечка
-                    PeakTick(valueDB: snapshot?.peakDB ?? -Float.infinity, maxDB: maxDB, minDB: minDB)
-                        .frame(width: 22, height: 140)
-                }
-                .frame(width: 22, height: 140)
+        HStack(spacing: 3) {
+            ScaleRuler(maxDB: meterMaxDB, minDB: meterMinDB)
+                .frame(width: 14, height: meterHeight)
+            ZStack(alignment: .bottom) {
+                Capsule()
+                    .fill(Color.black.opacity(0.1))
+                MeterFill(db: snapshot?.rmsDB ?? -Float.infinity)
+                PeakTickOverlay(valueDB: snapshot?.peakDB ?? -Float.infinity)
             }
+            .frame(width: 16, height: meterHeight)
+        }
+    }
+}
 
-            // Метрики колонкой
-            VStack(alignment: .leading, spacing: 2) {
-                metricRow("Peak", "пик", snapshot?.peakDB)
-                metricRow("RMS", "среднее", snapshot?.rmsDB)
-                metricRow("TruePk", "ист.пик", snapshot?.truePeakDB)
-                metricRow("M", "момент.", snapshot?.momentaryLUFS)
-                metricRow("S", "3 сек", snapshot?.shortTermLUFS)
-                metricRow("I", "интегр.", snapshot?.integratedLUFS)
+/// Стерео-пара: два смежных столбика в одной рамке + общая шкала.
+struct StereoMeterPair: View {
+    let left: ChannelSnapshot?
+    let right: ChannelSnapshot?
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ScaleRuler(maxDB: meterMaxDB, minDB: meterMinDB)
+                .frame(width: 14, height: meterHeight)
+            HStack(spacing: 2) {
+                ZStack(alignment: .bottom) {
+                    Rectangle().fill(Color.black.opacity(0.08))
+                    MeterFill(db: left?.rmsDB ?? -Float.infinity)
+                    PeakTickOverlay(valueDB: left?.peakDB ?? -Float.infinity)
+                }
+                ZStack(alignment: .bottom) {
+                    Rectangle().fill(Color.black.opacity(0.08))
+                    MeterFill(db: right?.rmsDB ?? -Float.infinity, tint: .blue)
+                    PeakTickOverlay(valueDB: right?.peakDB ?? -Float.infinity)
+                }
+            }
+            .frame(width: 30, height: meterHeight)
+        }
+    }
+}
+
+struct MeterFill: View {
+    let db: Float
+    var tint: Color = .green
+
+    var body: some View {
+        GeometryReader { geo in
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(fillColor)
+                    .frame(height: levelHeight(in: geo.size.height))
             }
         }
     }
 
-    private var rmsDB: Float { snapshot?.rmsDB ?? -Float.infinity }
-    private var rmsColor: Color {
-        let v = rmsDB
-        if !v.isFinite { return .green.opacity(0.3) }
-        if v > -3 { return .red }
-        if v > -9 { return .yellow }
-        return .green
+    private var fillColor: Color {
+        guard db.isFinite else { return tint.opacity(0.25) }
+        if db > -3 { return .red }
+        if db > -9 { return .yellow }
+        return tint
     }
 
-    private func levelHeight(_ db: Float, in height: CGFloat) -> CGFloat {
+    private func levelHeight(in height: CGFloat) -> CGFloat {
         guard db.isFinite else { return 0 }
-        let clamped = max(minDB, min(maxDB, db))
-        let t = (clamped - minDB) / (maxDB - minDB)
-        return CGFloat(t) * height
+        let clamped = max(meterMinDB, min(meterMaxDB, db))
+        return CGFloat((clamped - meterMinDB) / (meterMaxDB - meterMinDB)) * height
+    }
+}
+
+struct PeakTickOverlay: View {
+    let valueDB: Float
+
+    var body: some View {
+        GeometryReader { geo in
+            let clamped = max(meterMinDB, min(meterMaxDB, valueDB.isFinite ? valueDB : meterMinDB))
+            let y = geo.size.height * (1 - CGFloat((clamped - meterMinDB) / (meterMaxDB - meterMinDB)))
+            Rectangle()
+                .fill(valueDB > meterMaxDB - 1 ? Color.red : Color.primary.opacity(0.85))
+                .frame(height: 2)
+                .offset(y: y)
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// Числовые метрики: колонка справа от метра.
+struct MetricsColumn: View {
+    let title: String
+    let snapshot: ChannelSnapshot?
+    var showHints: Bool = false
+    var extraMetrics: [(String, String, Float?)] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if !title.isEmpty {
+                Text(title)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            metricRow("Peak", "пик", snapshot?.peakDB)
+            metricRow("RMS", "среднее", snapshot?.rmsDB)
+            metricRow("TruePk", "ист. пик", snapshot?.truePeakDB)
+            metricRow("M", "громк. 400мс", snapshot?.momentaryLUFS)
+            metricRow("S", "громк. 3с", snapshot?.shortTermLUFS)
+            metricRow("I", "громк. эфира", snapshot?.integratedLUFS)
+            metricRow("LRA", "разброс", snapshot?.loudnessRangeLU)
+            ForEach(extraMetrics, id: \.0) { m in
+                metricRow(m.0, m.1, m.2)
+            }
+        }
+        .frame(minWidth: 118, alignment: .leading)
     }
 
     @ViewBuilder

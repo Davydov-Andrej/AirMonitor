@@ -1,90 +1,101 @@
 import SwiftUI
 import yaCore
 
-/// Бегущий график громкости (Youlean-стиль): окно последних N секунд,
-/// моментальная и short-term громкость, целевая линия, подписи осей.
+/// Бегущий график громкости: окно последних N секунд. Режимы:
+/// моно (M/S-заливка+линия), стерео (3 линии: стерео, L, R).
 struct LoudnessHistoryChart: View {
-    let history: [LoudnessMeter.HistoryPoint]
+    var monoHistory: [LoudnessMeter.HistoryPoint] = []
+    var leftHistory: [LoudnessMeter.HistoryPoint] = []
+    var rightHistory: [LoudnessMeter.HistoryPoint] = []
     var target: Float = -23
     /// Окно отображения в секундах (история идёт 10 Гц).
     var windowSeconds: Double = 15
 
     private let minLU: Float = -40
     private let maxLU: Float = 0
-
-    /// Срез последних windowSeconds секунд.
-    private var visible: [LoudnessMeter.HistoryPoint] {
-        let count = Int(windowSeconds * 10)
-        return history.suffix(count)
-    }
+    private let stepHz: Double = 10
 
     var body: some View {
         Canvas { context, size in
-            // Сетка + подписи LU
-            for lu in stride(from: minLU + 10, to: maxLU, by: 10) {
-                let y = yPos(lu, size: size)
-                var grid = Path()
-                grid.move(to: CGPoint(x: 0, y: y))
-                grid.addLine(to: CGPoint(x: size.width, y: y))
-                context.stroke(grid, with: .color(.gray.opacity(0.15)), lineWidth: 0.5)
-                let text = Text("\(Int(lu))").font(.system(size: 8)).foregroundStyle(.secondary)
-                context.draw(text, at: CGPoint(x: 3, y: y + 2), anchor: .topLeading)
-            }
+            drawGrid(context: context, size: size)
 
-            // Целевая линия
-            let targetY = yPos(target, size: size)
-            var targetPath = Path()
-            targetPath.move(to: CGPoint(x: 0, y: targetY))
-            targetPath.addLine(to: CGPoint(x: size.width, y: targetY))
-            context.stroke(targetPath, with: .color(.green.opacity(0.45)), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            let capacity = Int(windowSeconds * stepHz)
+            let stepX = size.width / CGFloat(max(capacity - 1, 1))
 
-            let points = visible
-            guard !points.isEmpty else {
-                let text = Text("нет сигнала").font(.system(size: 9)).foregroundStyle(.tertiary)
-                context.draw(text, at: CGPoint(x: size.width / 2, y: size.height / 2))
-                return
-            }
-
-            // По времени до конца окна (график растёт справа налево — справа «сейчас»).
-            let stepX = size.width / CGFloat(max(Int(windowSeconds * 10) - 1, 1))
-            let offset = CGFloat(Int(windowSeconds * 10) - points.count)
-
-            // Short-term (заливка)
-            var stPath = Path()
-            stPath.move(to: CGPoint(x: size.width, y: size.height))
-            var hasST = false
-            for (i, point) in points.enumerated() {
-                guard point.shortTerm.isFinite else { continue }
-                let x = (offset + CGFloat(i)) * stepX
-                stPath.addLine(to: CGPoint(x: x, y: yPos(point.shortTerm, size: size)))
-                hasST = true
-            }
-            if hasST {
-                stPath.addLine(to: CGPoint(x: size.width, y: size.height))
-                stPath.closeSubpath()
-                context.fill(stPath, with: .color(.blue.opacity(0.18)))
-            }
-
-            // Momentary (линия)
-            var mPath = Path()
-            var started = false
-            for (i, point) in points.enumerated() {
-                guard point.momentary.isFinite else { continue }
-                let x = (offset + CGFloat(i)) * stepX
-                let y = yPos(point.momentary, size: size)
-                if started {
-                    mPath.addLine(to: CGPoint(x: x, y: y))
-                } else {
-                    mPath.move(to: CGPoint(x: x, y: y))
-                    started = true
-                }
-            }
-            if started {
-                context.stroke(mPath, with: .color(.blue), lineWidth: 1.3)
+            // Стерео-режим: 3 линии.
+            if !leftHistory.isEmpty || !rightHistory.isEmpty {
+                drawSeries(context: context, size: size, points: leftHistory, capacity: capacity,
+                           color: .red, fill: false)
+                drawSeries(context: context, size: size, points: rightHistory, capacity: capacity,
+                           color: .blue, fill: false)
+                drawSeries(context: context, size: size, points: monoHistory, capacity: capacity,
+                           color: .primary.opacity(0.55), fill: false, lineWidth: 2)
+            } else {
+                drawSeries(context: context, size: size, points: monoHistory, capacity: capacity,
+                           color: .blue, fill: true)
             }
         }
         .background(Color.black.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func drawGrid(context: GraphicsContext, size: CGSize) {
+        for lu in stride(from: minLU + 10, to: maxLU, by: 10) {
+            let y = yPos(lu, size: size)
+            var grid = Path()
+            grid.move(to: CGPoint(x: 0, y: y))
+            grid.addLine(to: CGPoint(x: size.width, y: y))
+            context.stroke(grid, with: .color(.gray.opacity(0.15)), lineWidth: 0.5)
+            let text = Text("\(Int(lu))").font(.system(size: 8)).foregroundStyle(.secondary)
+            context.draw(text, at: CGPoint(x: 3, y: y + 2), anchor: .topLeading)
+        }
+        let targetY = yPos(target, size: size)
+        var targetPath = Path()
+        targetPath.move(to: CGPoint(x: 0, y: targetY))
+        targetPath.addLine(to: CGPoint(x: size.width, y: targetY))
+        context.stroke(targetPath, with: .color(.green.opacity(0.45)), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+    }
+
+    private func drawSeries(
+        context: GraphicsContext, size: CGSize,
+        points: [LoudnessMeter.HistoryPoint], capacity: Int,
+        color: Color, fill: Bool, lineWidth: CGFloat = 1.2
+    ) {
+        guard !points.isEmpty else { return }
+        let stepX = size.width / CGFloat(max(capacity - 1, 1))
+        let offset = CGFloat(capacity - points.count)
+
+        if fill {
+            var path = Path()
+            path.move(to: CGPoint(x: size.width, y: size.height))
+            var anyFinite = false
+            for (i, p) in points.enumerated() {
+                guard p.shortTerm.isFinite else { continue }
+                path.addLine(to: CGPoint(x: (offset + CGFloat(i)) * stepX, y: yPos(p.shortTerm, size: size)))
+                anyFinite = true
+            }
+            guard anyFinite else { return }
+            path.addLine(to: CGPoint(x: (offset + CGFloat(points.count - 1)) * stepX, y: size.height))
+            path.closeSubpath()
+            context.fill(path, with: .color(color.opacity(0.16)))
+        }
+
+        var line = Path()
+        var started = false
+        for (i, p) in points.enumerated() {
+            guard p.momentary.isFinite else { continue }
+            let x = (offset + CGFloat(i)) * stepX
+            let y = yPos(p.momentary, size: size)
+            if started {
+                line.addLine(to: CGPoint(x: x, y: y))
+            } else {
+                line.move(to: CGPoint(x: x, y: y))
+                started = true
+            }
+        }
+        if started {
+            context.stroke(line, with: .color(color), style: StrokeStyle(lineWidth: lineWidth, lineJoin: .round))
+        }
     }
 
     private func yPos(_ lu: Float, size: CGSize) -> CGFloat {

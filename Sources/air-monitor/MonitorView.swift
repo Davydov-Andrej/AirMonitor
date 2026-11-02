@@ -1,7 +1,8 @@
 import SwiftUI
 import yaCore
 
-/// Монитор: уровни + история громкости по всем шинам.
+/// Монитор: метры + история громкости по всем шинам (та же вёрстка, что
+/// и дашборд, но без спектра/баланса).
 struct MonitorView: View {
     @EnvironmentObject var model: AppModel
 
@@ -16,27 +17,7 @@ struct MonitorView: View {
                 ScrollView {
                     VStack(spacing: 14) {
                         ForEach(model.snapshot.buses) { bus in
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Text(bus.name).font(.headline)
-                                    Spacer()
-                                    if let integrated = bus.displayChannels.first?.integratedLUFS, integrated.isFinite {
-                                        Text(String(format: "Integrated %.1f LUFS", integrated))
-                                            .font(.caption.monospacedDigit())
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    if let lra = bus.displayChannels.first?.loudnessRangeLU, lra > 0 {
-                                        Text(String(format: "LRA %.1f LU", lra))
-                                            .font(.caption.monospacedDigit())
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                ForEach(bus.displayChannels) { channel in
-                                    ChannelMeterCard(snapshot: channel)
-                                }
-                            }
-                            .padding()
-                            .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+                            MonitorBusRow(bus: bus)
                         }
                     }
                 }
@@ -46,47 +27,65 @@ struct MonitorView: View {
     }
 }
 
-struct ChannelMeterCard: View {
-    let snapshot: ChannelSnapshot
+struct MonitorBusRow: View {
+    let bus: BusSnapshot
+    @EnvironmentObject var model: AppModel
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(snapshot.label)
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-                Text(snapshot.peakDB.isFinite
-                     ? String(format: "%.1f dBFS", snapshot.peakDB)
-                     : "--")
-                    .font(.title3.monospacedDigit())
-            }
-
-            VUMeterView(valueDB: snapshot.vuDB, peakDB: snapshot.peakDB)
-
-            HStack(spacing: 12) {
-                metric("Peak", "пик", snapshot.peakDB)
-                metric("RMS", "среднеквадр.", snapshot.rmsDB)
-                metric("TruePeak", "истинный пик", snapshot.truePeakDB)
-                metric("Crest", "динамика", snapshot.crestFactorDB, suffix: " dB")
-                metric("M", "громкость 400 мс", snapshot.momentaryLUFS, suffix: " LU")
-                metric("S", "громкость 3 с", snapshot.shortTermLUFS, suffix: " LU")
-                metric("I", "громкость эфира", snapshot.integratedLUFS, suffix: " LU")
-            }
-
-            LoudnessHistoryChart(history: snapshot.loudnessHistory, target: -23)
-                .frame(height: 70)
-        }
-        .padding()
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.03)))
+    var isStereo: Bool {
+        if case .stereo = bus.mode { return true }
+        return false
     }
 
-    private func metric(_ name: String, _ hint: String, _ value: Float, suffix: String = " dB") -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("\(name) (\(hint))")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text(value.isFinite ? String(format: "%.1f%@", value, suffix) : "--")
-                .font(.system(.body, design: .monospaced).weight(.medium))
+    var summary: ChannelSnapshot? {
+        if isStereo { return bus.mono ?? bus.channels.first }
+        return bus.channels.first
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(bus.name).font(.headline)
+                Text(modeLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let correlation = bus.correlation {
+                    Text(String(format: "Корр. L/R: %.2f", correlation))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(alignment: .top, spacing: 14) {
+                if isStereo {
+                    StereoMeterPair(left: bus.channels.first, right: bus.channels.dropFirst().first)
+                } else {
+                    SingleMeter(snapshot: summary)
+                }
+                MetricsColumn(
+                    title: "",
+                    snapshot: summary,
+                    showHints: model.showMetricHints
+                )
+                LoudnessHistoryChart(
+                    monoHistory: summary?.loudnessHistory ?? [],
+                    leftHistory: isStereo ? bus.channels.first?.loudnessHistory ?? [] : [],
+                    rightHistory: isStereo ? bus.channels.dropFirst().first?.loudnessHistory ?? [] : [],
+                    target: -23,
+                    windowSeconds: 15
+                )
+                .frame(maxWidth: .infinity)
+                .frame(height: meterHeight)
+            }
+        }
+        .padding()
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+    }
+
+    private var modeLabel: String {
+        switch bus.mode {
+        case .stereo(let l, let r): return "Стерео \(l + 1)/\(r + 1)"
+        case .mono(let ch): return "Моно " + ch.map { "\($0 + 1)" }.joined(separator: "+")
         }
     }
 }

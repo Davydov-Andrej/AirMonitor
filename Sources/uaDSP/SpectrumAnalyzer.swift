@@ -127,23 +127,28 @@ public final class RTASpectrumAnalyzer {
         guard !samples.isEmpty else { return }
         lock.lock()
         defer { lock.unlock() }
+
+        // Кольцевой буфер: без removeFirst (O(n) копий на каждый кадр).
         ring.append(contentsOf: samples)
 
         let length = fft.length
-        let hop = max(1, length / 4)
-        var processed = false
+        // Перекрытие 50%: ~12 FFT/с (при 8192/48кГц) — достаточно при
+        // сглаживании, вдвое дешевле по CPU, чем 75%.
+        let hop = max(1, length / 2)
         while ring.count >= length {
             let block = Array(ring[0..<length])
-            ring.removeFirst(hop)
+            if hop >= ring.count {
+                ring.removeAll(keepingCapacity: true)
+            } else {
+                ring.removeFirst(hop)
+            }
             let power = fft.powerSpectrum(block.withUnsafeBufferPointer { $0 })
             guard power.count == fft.halfLength else { continue }
             integrate(power)
-            processed = true
         }
-        if ring.count > length * 4 {
+        if ring.count > length * 2 {
             ring.removeFirst(ring.count - length)
         }
-        _ = processed
     }
 
     // MARK: - Ядро
@@ -232,8 +237,10 @@ public final class RTASpectrumAnalyzer {
             fineEnergy[i] += alpha * (sum - fineEnergy[i])
         }
 
-        publishBands()
+        bandsDirty = true
     }
+
+    private var bandsDirty = true
 
     private func dBFromEnergy(_ e: Float) -> Float {
         guard e > 1e-14 else { return -120 }
@@ -266,10 +273,23 @@ public final class RTASpectrumAnalyzer {
             )
         }
         fineCurve = fine
+        bandsDirty = false
+    }
+
+    /// Полосы и кривая для UI (пересобираются только если данные изменились).
+    public func snapshotData() -> (bands: [RTABand], fine: [SpectrumPoint]) {
+        lock.lock()
+        defer { lock.unlock() }
+        if bandsDirty {
+            publishBands()
+        }
+        return (bands, fineCurve)
     }
 
     /// Точки октавных полос для кривой.
     public func spectrumPoints() -> [SpectrumPoint] {
-        bands.map { SpectrumPoint(id: $0.id, frequency: $0.centerFrequency, magnitudeDB: $0.levelDB) }
+        snapshotData().bands.map {
+            SpectrumPoint(id: $0.id, frequency: $0.centerFrequency, magnitudeDB: $0.levelDB)
+        }
     }
 }
