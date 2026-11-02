@@ -68,26 +68,24 @@ struct MonitorBusRowContainer: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.05)) { _ in
-            MonitorBusRow(
-                busName: bus.config.name,
-                busMode: bus.config.mode,
-                snapshot: holder.snapshot,
-                isConnected: bus.isConnected,
-                showHints: model.showMetricHints,
-                onMoveUp: onMoveUp,
-                onMoveDown: onMoveDown,
-                canMoveUp: canMoveUp,
-                canMoveDown: canMoveDown
-            )
-        }
+        MonitorBusRow(
+            busName: bus.config.name,
+            busMode: bus.config.mode,
+            holder: holder,
+            isConnected: bus.isConnected,
+            showHints: model.showMetricHints,
+            onMoveUp: onMoveUp,
+            onMoveDown: onMoveDown,
+            canMoveUp: canMoveUp,
+            canMoveDown: canMoveDown
+        )
     }
 }
 
 struct MonitorBusRow: View {
     let busName: String
     let busMode: BusMode
-    let snapshot: BusSnapshot?
+    let holder: BusSnapshotHolder
     var isConnected: Bool = true
     var showHints: Bool = false
     var onMoveUp: () -> Void = {}
@@ -99,6 +97,8 @@ struct MonitorBusRow: View {
         if case .stereo = busMode { return true }
         return false
     }
+
+    private var snapshot: BusSnapshot? { holder.snapshot }
 
     var summary: ChannelSnapshot? {
         guard let snapshot else { return nil }
@@ -157,15 +157,17 @@ struct MonitorBusRow: View {
                     snapshot: summary,
                     showHints: showHints
                 )
-                LoudnessHistoryChart(
-                    monoHistory: summary?.loudnessHistory ?? [],
-                    leftHistory: isStereo ? snapshot?.channels.first?.loudnessHistory ?? [] : [],
-                    rightHistory: isStereo ? snapshot?.channels.dropFirst().first?.loudnessHistory ?? [] : [],
-                    target: -23,
-                    windowSeconds: 15
-                )
-                .frame(maxWidth: .infinity)
-                .frame(height: meterHeight)
+                TimelineView(.periodic(from: .now, by: 0.05)) { _ in
+                    LoudnessHistoryChart(
+                        monoHistory: summary?.loudnessHistory ?? [],
+                        leftHistory: isStereo ? snapshot?.channels.first?.loudnessHistory ?? [] : [],
+                        rightHistory: isStereo ? snapshot?.channels.dropFirst().first?.loudnessHistory ?? [] : [],
+                        target: -23,
+                        windowSeconds: 15
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: meterHeight)
+                }
             }
         }
         .padding()

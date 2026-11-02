@@ -142,26 +142,25 @@ struct BusDashboardCardContainer: View {
     var canMoveDown: Bool = false
 
     var body: some View {
-        // Pull-отрисовка: Canvas обновляется по часам (20 Гц), читая последние
-        // данные. Джиттер доставки с DSP-очереди не влияет на кадровую частоту.
-        TimelineView(.periodic(from: .now, by: 0.05)) { _ in
-            BusDashboardCard(
-                id: bus.id,
-                name: bus.config.name,
-                mode: bus.config.mode,
-                snapshot: holder.snapshot,
-                isConnected: bus.isConnected,
-                onDelete: onDelete,
-                onRename: onRename,
-                onEdit: onEdit,
-                onMoveUp: onMoveUp,
-                onMoveDown: onMoveDown,
-                onResizeSpectrum: onResizeSpectrum,
-                spectrumFraction: bus.config.spectrumWidthFraction,
-                canMoveUp: canMoveUp,
-                canMoveDown: canMoveDown
-            )
-        }
+        // Без внешнего TimelineView: статичная часть карточки (метры, метрики,
+        // header) НЕ пересоздаётся 20 раз/с. Живые Canvas-графики обновляются
+        // собственными TimelineView внутри (см. BusDashboardCard).
+        BusDashboardCard(
+            id: bus.id,
+            name: bus.config.name,
+            mode: bus.config.mode,
+            holder: holder,
+            isConnected: bus.isConnected,
+            onDelete: onDelete,
+            onRename: onRename,
+            onEdit: onEdit,
+            onMoveUp: onMoveUp,
+            onMoveDown: onMoveDown,
+            onResizeSpectrum: onResizeSpectrum,
+            spectrumFraction: bus.config.spectrumWidthFraction,
+            canMoveUp: canMoveUp,
+            canMoveDown: canMoveDown
+        )
     }
 }
 
@@ -170,7 +169,7 @@ struct BusDashboardCard: View {
     let id: BusID
     let name: String
     let mode: BusMode
-    let snapshot: BusSnapshot?
+    let holder: BusSnapshotHolder
     var isConnected: Bool = true
     let onDelete: () -> Void
     let onRename: (String) -> Void
@@ -199,20 +198,23 @@ struct BusDashboardCard: View {
             header
 
             // Верхний ряд: метр(ы) + метрики + график громкости.
-            // Ширина подстраивается: моно — компактно, стерео — чуть шире.
             HStack(alignment: .top, spacing: 14) {
                 meterBlock
                     .fixedSize()
 
-                LoudnessHistoryChart(
-                    monoHistory: summaryChannel?.loudnessHistory ?? [],
-                    leftHistory: isStereo ? leftChannel?.loudnessHistory ?? [] : [],
-                    rightHistory: isStereo ? rightChannel?.loudnessHistory ?? [] : [],
-                    target: -23,
-                    windowSeconds: 15
-                )
-                .frame(maxWidth: .infinity)
-                .frame(height: 150)
+                // Живая секция: перерисовка по таймеру, статика рядом не дёргается.
+                TimelineView(.periodic(from: .now, by: 0.05)) { _ in
+                    LoudnessHistoryChart(
+                        monoHistory: summaryChannel?.loudnessHistory ?? [],
+                        leftHistory: isStereo ? leftChannel?.loudnessHistory ?? [] : [],
+                        rightHistory: isStereo ? rightChannel?.loudnessHistory ?? [] : [],
+                        target: -23,
+                        windowSeconds: 15
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 150)
+                    .id("loudness")
+                }
             }
 
             Divider()
@@ -226,11 +228,13 @@ struct BusDashboardCard: View {
                         Text("Спектр")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        SpectrumCurveChart(
-                            fine: summaryChannel?.fineCurve ?? [],
-                            bands: summaryChannel?.rtaBands ?? []
-                        )
-                        .frame(height: 130)
+                        TimelineView(.periodic(from: .now, by: 0.05)) { _ in
+                            SpectrumCurveChart(
+                                fine: summaryChannel?.fineCurve ?? [],
+                                bands: summaryChannel?.rtaBands ?? []
+                            )
+                            .frame(height: 130)
+                        }
                     }
                     .frame(width: dragWidth, alignment: .leading)
 
@@ -249,11 +253,13 @@ struct BusDashboardCard: View {
                         Text("Тональный баланс")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        TonalBalanceChart(
-                            balances: summaryChannel?.tonalBalances ?? [],
-                            hasSignal: summaryChannel?.tonalBalances.isEmpty == false
-                        )
-                        .frame(height: 130)
+                        TimelineView(.periodic(from: .now, by: 0.05)) { _ in
+                            TonalBalanceChart(
+                                balances: summaryChannel?.tonalBalances ?? [],
+                                hasSignal: summaryChannel?.tonalBalances.isEmpty == false
+                            )
+                            .frame(height: 130)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, 8)
@@ -277,6 +283,8 @@ struct BusDashboardCard: View {
         if case .stereo = mode { return true }
         return false
     }
+
+    private var snapshot: BusSnapshot? { holder.snapshot }
 
     /// Сводный канал: для стерео — «Стерео», для моно — единственный.
     private var summaryChannel: ChannelSnapshot? {
