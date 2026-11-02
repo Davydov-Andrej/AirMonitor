@@ -36,7 +36,7 @@ struct BalanceView: View {
 
 struct BalanceBusCardContainer: View {
     let bus: MonitorBus
-    @ObservedObject var holder: BusSnapshotHolder
+    let holder: BusSnapshotHolder
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.05)) { _ in

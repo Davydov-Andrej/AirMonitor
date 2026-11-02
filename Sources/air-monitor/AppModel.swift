@@ -352,9 +352,28 @@ final class AppModel: ObservableObject {
             settings: .init(fftLength: 4096, updateRateHz: updateRateHz, windowType: .hann, rta: rtaSettings)
         )
         publisher.updateDeviceMap(devices)
+
+        // Регистрируем холдеры ДО старта: publish пишет в них напрямую с
+        // DSP-очереди (потокобезопасно, без прыжков в MainActor).
+        holdersLock.lock()
+        for bus in buses {
+            holders[bus.config.id] = BusSnapshotHolder(id: bus.config.id)
+        }
+        holdersLock.unlock()
+
         publisher.setOnSnapshot { [weak self] snapshot in
-            Task { @MainActor in
-                self?.applySnapshot(snapshot)
+            // Горячий путь (до 60 раз/с): только запись в lock-хранилища.
+            // MainActor не задействован — UI читает данные по TimelineView.
+            guard let self else { return }
+            let newOrder = snapshot.buses.map(\.id)
+            if newOrder != self.currentOrder {
+                self.currentOrder = newOrder
+                Task { @MainActor [weak self] in
+                    self?.syncOrderFromSnapshot(newOrder)
+                }
+            }
+            for bus in snapshot.buses {
+                self.holders[bus.id]?.update(bus)
             }
         }
 
@@ -379,20 +398,25 @@ final class AppModel: ObservableObject {
         EngineLog.log("startCapture: шин \(buses.count)")
     }
 
-    /// Применяет снимок, обновляя только изменившиеся шины.
-    private func applySnapshot(_ newSnapshot: AppSnapshot) {
-        // Порядок/состав шин изменился — полное обновление (редко).
-        if newSnapshot.buses.map(\.id) != snapshot.buses.map(\.id) {
-            snapshot = newSnapshot
-        }
+    /// Порядок шин последнего снапшота (сравнение из DSP-потока, Guarded by holdersLock не требуется — записывается только тут).
+    private var currentOrder: [BusID] = []
+    /// Флаг изменения порядка (ставится из DSP-потока, снимается на MainActor).
+    private let orderChangedLock = NSLock()
+    private var orderChangedPending: [BusID]? = nil
 
-        for bus in newSnapshot.buses {
-            let holder = holders[bus.id]
-            holder?.snapshot = bus
-        }
+    /// Синхронизирует порядок из снапшота (редко, только при изменении состава).
+    @MainActor
+    private func syncOrderFromSnapshot(_ order: [BusID]) {
+        snapshot = AppSnapshot(
+            buses: order.compactMap { holders[$0]?.snapshot },
+            integratedLUFS: snapshot.integratedLUFS,
+            loudnessRangeLU: snapshot.loudnessRangeLU,
+            timestamp: Date()
+        )
     }
 
     private var holders: [BusID: BusSnapshotHolder] = [:]
+    private let holdersLock = NSLock()
 
     func stopCapture() {
         isCapturing = false
@@ -504,6 +528,8 @@ extension AppModel {
 
     /// Холдер снимка шины для изолированных обновлений карточки.
     func holder(for bus: MonitorBus) -> BusSnapshotHolder {
+        holdersLock.lock()
+        defer { holdersLock.unlock() }
         if let h = holders[bus.id] { return h }
         let h = BusSnapshotHolder(id: bus.id)
         holders[bus.id] = h
@@ -511,13 +537,27 @@ extension AppModel {
     }
 }
 
-/// ObservableObject-обёртка снимка одной шины: карточка перерисовывается
-/// только когда обновился именно её снимок.
-final class BusSnapshotHolder: ObservableObject {
-    @Published var snapshot: BusSnapshot?
+/// Потокобезопасное хранилище снимка шины. БЕЗ ObservableObject/@Published:
+/// UI читает данные по своему таймеру (TimelineView), пуш-инвалидаций SwiftUI
+/// нет — publish не дёргает main-поток.
+final class BusSnapshotHolder {
+    private let lock = NSLock()
+    private var storage: BusSnapshot?
     let id: BusID
 
     init(id: BusID) {
         self.id = id
+    }
+
+    var snapshot: BusSnapshot? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func update(_ snapshot: BusSnapshot) {
+        lock.lock()
+        storage = snapshot
+        lock.unlock()
     }
 }

@@ -131,7 +131,7 @@ struct SaveSceneSheet: View {
 /// снимка СВОЕЙ шины, а не всего дашборда.
 struct BusDashboardCardContainer: View {
     let bus: MonitorBus
-    @ObservedObject var holder: BusSnapshotHolder
+    let holder: BusSnapshotHolder
     let onDelete: () -> Void
     let onRename: (String) -> Void
     var onEdit: () -> Void = {}

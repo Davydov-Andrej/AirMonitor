@@ -40,7 +40,7 @@ struct MonitorView: View {
 /// Изолированный контейнер: обновляется только при изменении снимка шины.
 struct MonitorBusRowContainer: View {
     let bus: MonitorBus
-    @ObservedObject var holder: BusSnapshotHolder
+    let holder: BusSnapshotHolder
     var onMoveUp: () -> Void = {}
     var onMoveDown: () -> Void = {}
     var canMoveUp: Bool = false
