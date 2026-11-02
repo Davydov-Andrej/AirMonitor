@@ -73,13 +73,13 @@ public final class AudioDataPublisher: @unchecked Sendable {
 
     public struct Settings {
         public var fftLength: Int = 8192
-        public var updateRateHz: Double = 25
+        public var updateRateHz: Double = 15
         public var windowType: FFT.WindowType = .hann
         public var rta: RTASettings = .default
 
         public init(
             fftLength: Int = 8192,
-            updateRateHz: Double = 25,
+            updateRateHz: Double = 15,
             windowType: FFT.WindowType = .hann,
             rta: RTASettings = .default
         ) {
@@ -146,6 +146,14 @@ public final class AudioDataPublisher: @unchecked Sendable {
             buses[config.id] = nil
             return false
         }
+        // Фильтр каналов: копируем только нужные шинам этого устройства.
+        var wanted: Set<Int> = []
+        for runtime in buses.values where runtime.deviceID == deviceID {
+            for ch in runtime.config.mode.channelIndexes {
+                wanted.insert(ch)
+            }
+        }
+        deviceEngine.updateWantedChannels(deviceID: deviceID, channels: wanted)
         deviceEngine.setDestination(deviceID: deviceID) { [weak self] frame in
             self?.ingest(frame: frame, from: deviceID)
         }
@@ -384,10 +392,46 @@ public final class MultiDeviceCapture: @unchecked Sendable {
         }
     }
 
+    /// Обновляет список нужных каналов устройства (фильтр в render-колбэке).
+    public func updateWantedChannels(deviceID: AudioDeviceID, channels: Set<Int>) {
+        lock.lock()
+        defer { lock.unlock() }
+        captures[deviceID]?.wantedChannels = channels
+    }
+
+    /// Переподключает захват к устройству (после дисконнекта/реконнекта).
+    public func restartCapture(deviceID: AudioDeviceID) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let rate = lastRates[deviceID] ?? 48000
+        captures[deviceID]?.stop()
+        captures[deviceID] = nil
+
+        let inputChannels = AudioHAL.inputChannels(for: deviceID)
+        guard inputChannels > 0 else { return false }
+        let spec = AudioSourceSpec(
+            deviceID: deviceID,
+            sampleRate: rate,
+            inputChannels: inputChannels
+        )
+        guard let capture = AudioCaptureImpl(spec: spec) else { return false }
+        capture.wantedChannels = wantedByDevice[deviceID] ?? []
+        capture.onFrame = { [weak self] frame in
+            self?.onFrameByDevice[deviceID]?(frame)
+        }
+        guard capture.start() else { return false }
+        captures[deviceID] = capture
+        return true
+    }
+
+    private var lastRates: [AudioDeviceID: Double] = [:]
+    private var wantedByDevice: [AudioDeviceID: Set<Int>] = [:]
+
     @discardableResult
     public func ensureCapturing(deviceID: AudioDeviceID, rate: Double) -> Bool {
         lock.lock()
         defer { lock.unlock() }
+        lastRates[deviceID] = rate
         if captures[deviceID] != nil { return true }
 
         let inputChannels = AudioHAL.inputChannels(for: deviceID)

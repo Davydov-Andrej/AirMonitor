@@ -44,11 +44,16 @@ struct DashboardView: View {
                                 name: bus.config.name,
                                 mode: bus.config.mode,
                                 snapshot: model.busPreview(for: bus),
+                                isConnected: bus.isConnected,
                                 onDelete: { model.removeBus(id: bus.id) },
                                 onRename: { newName in model.renameBus(id: bus.id, to: newName) },
                                 onEdit: { model.beginEditBus(id: bus.id) },
                                 onMoveUp: { model.moveBusUp(id: bus.id) },
                                 onMoveDown: { model.moveBusDown(id: bus.id) },
+                                onResizeSpectrum: { fraction in
+                                    model.setBusSpectrumFraction(id: bus.id, fraction: fraction)
+                                },
+                                spectrumFraction: bus.config.spectrumWidthFraction,
                                 canMoveUp: model.buses.first?.id != bus.id,
                                 canMoveDown: model.buses.last?.id != bus.id
                             )
@@ -132,13 +137,24 @@ struct BusDashboardCard: View {
     let name: String
     let mode: BusMode
     let snapshot: BusSnapshot?
+    var isConnected: Bool = true
     let onDelete: () -> Void
     let onRename: (String) -> Void
     var onEdit: () -> Void = {}
     var onMoveUp: () -> Void = {}
     var onMoveDown: () -> Void = {}
+    var onResizeSpectrum: (Double) -> Void = { _ in }
+    var spectrumFraction: Double = 0.5
     var canMoveUp: Bool = false
     var canMoveDown: Bool = false
+
+    private var busSpectrumFraction: Double {
+        max(0.25, min(0.75, spectrumFraction))
+    }
+
+    private func clampedFraction(_ f: Double) -> Double {
+        max(0.25, min(0.75, f))
+    }
 
     @EnvironmentObject var model: AppModel
     @State private var isRenaming = false
@@ -167,33 +183,49 @@ struct BusDashboardCard: View {
 
             Divider()
 
-            HStack(alignment: .top, spacing: 14) {
-                // Спектр
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Спектр")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    SpectrumCurveChart(
-                        fine: summaryChannel?.fineCurve ?? [],
-                        bands: summaryChannel?.rtaBands ?? []
-                    )
-                    .frame(height: 130)
-                }
-                .frame(maxWidth: .infinity)
+            // Нижний ряд: Спектр | Баланс — ширина регулируется перетаскиванием.
+            GeometryReader { geo in
+                let width = geo.size.width
+                let dragWidth = width * CGFloat(busSpectrumFraction)
+                HStack(alignment: .top, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Спектр")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        SpectrumCurveChart(
+                            fine: summaryChannel?.fineCurve ?? [],
+                            bands: summaryChannel?.rtaBands ?? []
+                        )
+                        .frame(height: 130)
+                    }
+                    .frame(width: dragWidth, alignment: .leading)
 
-                // Баланс
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Тональный баланс")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TonalBalanceChart(
-                        spectrum: summaryChannel?.spectrum ?? [],
-                        sampleRate: Float(snapshot?.sampleRate ?? 48000)
-                    )
-                    .frame(height: 130)
+                    Divider()
+                        .frame(height: 150)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 1)
+                                .onEnded { value in
+                                    let newFraction = busSpectrumFraction + Double(value.translation.width / width)
+                                    onResizeSpectrum(clampedFraction(newFraction))
+                                }
+                        )
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Тональный баланс")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TonalBalanceChart(
+                            spectrum: summaryChannel?.spectrum ?? [],
+                            sampleRate: Float(snapshot?.sampleRate ?? 48000)
+                        )
+                        .frame(height: 130)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 8)
                 }
-                .frame(maxWidth: .infinity)
             }
+            .frame(height: 155)
         }
         .padding()
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
@@ -298,6 +330,12 @@ struct BusDashboardCard: View {
                 Text("ожидает «Старт»")
                     .font(.caption2)
                     .foregroundStyle(.orange)
+            }
+            if !isConnected {
+                Label("устройство отключено", systemImage: "cable.connector.slash")
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .help("Анализ прерван. Подключите устройство — мониторинг продолжится автоматически.")
             }
             Spacer()
             Menu {

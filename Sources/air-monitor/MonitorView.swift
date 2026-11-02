@@ -16,8 +16,15 @@ struct MonitorView: View {
             } else {
                 ScrollView {
                     VStack(spacing: 14) {
-                        ForEach(model.snapshot.buses) { bus in
-                            MonitorBusRow(bus: bus)
+                        let busList = model.snapshot.buses
+                        ForEach(Array(zip(busList.indices, busList)), id: \.1.id) { index, bus in
+                            MonitorBusRow(
+                                bus: bus,
+                                onMoveUp: { model.moveBusSnapshot(id: bus.id, delta: -1) },
+                                onMoveDown: { model.moveBusSnapshot(id: bus.id, delta: 1) },
+                                canMoveUp: index > 0,
+                                canMoveDown: index < busList.count - 1
+                            )
                         }
                     }
                 }
@@ -29,6 +36,10 @@ struct MonitorView: View {
 
 struct MonitorBusRow: View {
     let bus: BusSnapshot
+    var onMoveUp: () -> Void = {}
+    var onMoveDown: () -> Void = {}
+    var canMoveUp: Bool = false
+    var canMoveDown: Bool = false
     @EnvironmentObject var model: AppModel
 
     var isStereo: Bool {
@@ -43,7 +54,24 @@ struct MonitorBusRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(spacing: 8) {
+                VStack(spacing: 2) {
+                    Button(action: onMoveUp) {
+                        Image(systemName: "chevron.up")
+                            .font(.caption2)
+                            .foregroundStyle(canMoveUp ? .primary : .tertiary)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(!canMoveUp)
+                    Button(action: onMoveDown) {
+                        Image(systemName: "chevron.down")
+                            .font(.caption2)
+                            .foregroundStyle(canMoveDown ? .primary : .tertiary)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(!canMoveDown)
+                }
+
                 Text(bus.name).font(.headline)
                 Text(modeLabel)
                     .font(.caption)

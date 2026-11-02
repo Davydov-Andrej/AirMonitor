@@ -24,6 +24,10 @@ final class AudioCaptureImpl {
     /// Вызывается на фоне (не на аудио-потоке) с собранным кадром.
     var onFrame: (@Sendable (Frame) -> Void)?
 
+    /// Каналы, которые реально нужны. Пусто = все. Фильтрация происходит
+    /// прямо в render-колбэке — лишние каналы не копируются вообще.
+    var wantedChannels: Set<Int> = []
+
     /// Связанные с инстансом данные для render-колбэка (без захвата контекста).
     private var context = CaptureContext()
 
@@ -121,9 +125,10 @@ final class AudioCaptureImpl {
 
         let list = UnsafeMutableAudioBufferListPointer(abl)
         var channels: [(Int, [Float])] = []
-        channels.reserveCapacity(channelCount)
+        channels.reserveCapacity(wantedChannels.isEmpty ? channelCount : min(wantedChannels.count, channelCount))
 
         for c in 0..<channelCount {
+            if !wantedChannels.isEmpty && !wantedChannels.contains(c) { continue }
             guard c < list.count else { break }
             let buffer = list[c]
             guard let data = buffer.mData else { continue }
@@ -135,18 +140,55 @@ final class AudioCaptureImpl {
             channels.append((c, samples))
         }
 
-        let frame = Frame(
+        guard !channels.isEmpty else { return }
+
+        // Аудио-поток только копирует кадр в очередь (не блокируясь); анализ
+        // происходит на отдельной serial-очереди. Если анализ не успевает —
+        // старые кадры дропаются (реальное время важнее полноты).
+        enqueue(frame: Frame(
             channelSamples: channels.map { ChannelSamples(channelIndex: $0.0, samples: $0.1) },
             frameCount: frames,
             sampleRate: spec.sampleRate
-        )
+        ))
+    }
 
-        if let onFrame {
-            DispatchQueue.global(qos: .userInteractive).async {
-                onFrame(frame)
+    /// Неблокирующая очередь кадров с дропом старых (bounded, lock-based,
+    /// но критическая секция микроскопическая).
+    private var frameQueue: [Frame] = []
+    private let frameQueueLock = NSLock()
+    private let frameQueueLimit = 8
+
+    private func enqueue(frame: Frame) {
+        var dropped = false
+        frameQueueLock.lock()
+        if frameQueue.count >= frameQueueLimit {
+            frameQueue.removeFirst()
+            dropped = true
+        }
+        frameQueue.append(frame)
+        frameQueueLock.unlock()
+
+        if !dropped || frameQueue.count == 1 {
+            consumerQueue.async { [weak self] in
+                self?.drainQueue()
             }
         }
     }
+
+    private func drainQueue() {
+        while true {
+            frameQueueLock.lock()
+            guard !frameQueue.isEmpty else {
+                frameQueueLock.unlock()
+                return
+            }
+            let frame = frameQueue.removeFirst()
+            frameQueueLock.unlock()
+            onFrame?(frame)
+        }
+    }
+
+    private let consumerQueue = DispatchQueue(label: "airmonitor.capture.consumer", qos: .userInteractive)
 
     /// Render-колбэк инстанса: вызывается на аудио-потоке.
     private func captureRenderCallback(
@@ -159,10 +201,37 @@ final class AudioCaptureImpl {
         guard frames > 0, Int(frames) <= context.bufferFrames else { return noErr }
 
         let status = AudioUnitRender(unit, actionFlags, timeStamp!, bus, frames, abl)
-        guard status == noErr else { return noErr }
+        if status != noErr {
+            // Устройство умерло (отключено) — сообщаем один раз.
+            // -10874 = kAudioUnitErr_InvalidElement, -50 params, -10875...
+            // Практически: любые повторяющиеся ошибки после отключения.
+            if status == -10874 || status == kAudioHardwareBadObjectError || status == -1856 {
+                notifyDisconnect()
+            } else {
+                disconnectErrorCount += 1
+                if disconnectErrorCount > 50 {
+                    notifyDisconnect()
+                }
+            }
+            return noErr
+        }
 
         handleCaptured(frames: Int(frames))
         return noErr
+    }
+
+    var onDisconnect: (() -> Void)?
+    private var disconnectNotified = false
+    private var disconnectErrorCount = 0
+
+    private func notifyDisconnect() {
+        guard !disconnectNotified else { return }
+        disconnectNotified = true
+        log("AUHAL: устройство отключено (ошибка render)")
+        let handler = onDisconnect
+        DispatchQueue.global(qos: .userInitiated).async {
+            handler?()
+        }
     }
 
     // MARK: - Private

@@ -37,6 +37,8 @@ public struct MonitorBusConfig: Sendable, Identifiable, Codable {
     public let sampleRate: Double
     public let fftLength: Int
     public let windowType: FFT.WindowType
+    /// Доля ширины спектра в нижнем ряду (0.25...0.75). Настройка сетки.
+    public var spectrumWidthFraction: Double
 
     public init(
         id: BusID = BusID(),
@@ -45,7 +47,8 @@ public struct MonitorBusConfig: Sendable, Identifiable, Codable {
         mode: BusMode,
         sampleRate: Double = 48000,
         fftLength: Int = 8192,
-        windowType: FFT.WindowType = .hann
+        windowType: FFT.WindowType = .hann,
+        spectrumWidthFraction: Double = 0.5
     ) {
         self.id = id
         self.name = name
@@ -54,6 +57,7 @@ public struct MonitorBusConfig: Sendable, Identifiable, Codable {
         self.sampleRate = sampleRate
         self.fftLength = fftLength
         self.windowType = windowType
+        self.spectrumWidthFraction = spectrumWidthFraction
     }
 
     public func changingName(_ newName: String) -> MonitorBusConfig {

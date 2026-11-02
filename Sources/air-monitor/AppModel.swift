@@ -62,7 +62,7 @@ final class AppModel: ObservableObject {
             persistRTASettings()
         }
     }
-    @Published var updateRateHz: Double = 25 {
+    @Published var updateRateHz: Double = 15 {
         didSet {
             persistUpdateRate()
         }
@@ -120,6 +120,44 @@ final class AppModel: ObservableObject {
             draftDeviceUID = devices.first(where: { $0.isDefaultInput })?.uid
                 ?? devices.first?.uid
         }
+
+        // Дисконнект/реконнект: обновляем состояние шин и пробуем автореконнект.
+        updateBusConnectionStates()
+    }
+
+    /// Помечает шины с отсутствующим устройством и автоматически
+    /// переподключает те, чьё устройство вернулось.
+    private func updateBusConnectionStates() {
+        let availableUIDs = Set(devices.map { $0.uid })
+
+        for index in buses.indices {
+            let uid = buses[index].config.deviceUID
+            let isConnected = availableUIDs.contains(uid)
+
+            // Дисконнект во время захвата: помечаем и разрываем подписку
+            // (иначе шина молча фолбэкается на системный вход).
+            if !isConnected && buses[index].isConnected {
+                buses[index].needsReconnect = true
+                publisher?.removeBus(id: buses[index].id)
+                EngineLog.log("Дисконнект устройства шины «\(buses[index].config.name)»")
+            }
+
+            // Реконнект: устройство вернулось.
+            if isConnected && !buses[index].isConnected && isCapturing {
+                EngineLog.log("Реконнект шины «\(buses[index].config.name)»")
+                reconnectBus(at: index)
+                buses[index].needsReconnect = false
+            }
+
+            buses[index].isConnected = isConnected
+        }
+    }
+
+    private func reconnectBus(at index: Int) {
+        guard let publisher else { return }
+        let config = buses[index].config
+        publisher.updateDeviceMap(devices)
+        _ = publisher.addBus(config)
     }
 
     func startObservingDeviceChanges() {
@@ -262,6 +300,18 @@ final class AppModel: ObservableObject {
     func moveBusDown(id: BusID) {
         guard let index = buses.firstIndex(where: { $0.id == id }), index < buses.count - 1 else { return }
         buses.swapAt(index, index + 1)
+        autosaveCurrentScene()
+    }
+
+    /// Перемещение по снимку (для вкладок, где рендер идёт из snapshot).
+    func moveBusSnapshot(id: BusID, delta: Int) {
+        if delta < 0 { moveBusUp(id: id) } else { moveBusDown(id: id) }
+    }
+
+    /// Настройка сетки: доля ширины спектра в нижнем ряду карточки шины.
+    func setBusSpectrumFraction(id: BusID, fraction: Double) {
+        guard let index = buses.firstIndex(where: { $0.id == id }) else { return }
+        buses[index].config.spectrumWidthFraction = max(0.25, min(0.75, fraction))
         autosaveCurrentScene()
     }
 
@@ -408,6 +458,10 @@ final class AppModel: ObservableObject {
 /// Шина мониторинга в UI. Хранит конфиг.
 final class MonitorBus: ObservableObject, Identifiable {
     @Published var config: MonitorBusConfig
+    /// Устройство доступно в системе.
+    @Published var isConnected: Bool = true
+    /// Захват прерван из-за дисконнекта — требуется переподключение.
+    @Published var needsReconnect: Bool = false
 
     var id: BusID { config.id }
 
