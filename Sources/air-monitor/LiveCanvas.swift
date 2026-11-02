@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import CoreVideo
+import yaCore
 
 /// NSView с CVDisplayLink — тик отрисовки синхронно с экраном и ВНЕ
 /// коалесценции event-loop. Ключевое отличие от SwiftUI TimelineView:
@@ -59,9 +60,15 @@ final class LiveCanvasNSView: NSView {
         }
     }
 
+    nonisolated(unsafe) static var drawCount = 0
+
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         ctx.saveGState()
+        // AppKit-координаты: начало снизу-слева. Логика графиков написана для
+        // SwiftUI (сверху-слева) — флипаем, чтобы не переписывать yPos-функции.
+        ctx.translateBy(x: 0, y: bounds.height)
+        ctx.scaleBy(x: 1, y: -1)
         drawer?(ctx, bounds.size)
         ctx.restoreGState()
     }

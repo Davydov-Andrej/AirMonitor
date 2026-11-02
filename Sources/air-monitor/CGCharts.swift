@@ -46,8 +46,8 @@ enum CGChart {
                 path.move(to: CGPoint(x: 0, y: y))
                 path.addLine(to: CGPoint(x: size.width, y: y))
                 stroke(ctx, path, color: .gray, width: 0.5, alpha: 0.15)
-                NSAttributedString(string: "\(db)", attributes: labelAttrs)
-                    .draw(at: CGPoint(x: 4, y: y + 1))
+                drawText(NSAttributedString(string: "\(db)", attributes: labelAttrs),
+                         at: CGPoint(x: 4, y: y + 1), height: size.height)
             }
 
             // Тики частот + подписи
@@ -57,8 +57,8 @@ enum CGChart {
                 path.move(to: CGPoint(x: fx, y: 0))
                 path.addLine(to: CGPoint(x: fx, y: size.height))
                 stroke(ctx, path, color: .gray, width: 0.5, alpha: 0.12)
-                let str = NSAttributedString(string: label, attributes: labelAttrs)
-                str.draw(at: CGPoint(x: fx + 3, y: size.height - 12))
+                drawText(NSAttributedString(string: label, attributes: labelAttrs),
+                         at: CGPoint(x: fx + 3, y: size.height - 12), height: size.height)
             }
 
             // Октавные полосы + пик-холд
@@ -161,8 +161,8 @@ enum CGChart {
                 path.move(to: CGPoint(x: 0, y: y))
                 path.addLine(to: CGPoint(x: size.width, y: y))
                 stroke(ctx, path, color: .gray, width: 0.5, alpha: 0.15)
-                NSAttributedString(string: "\(Int(lu))", attributes: labelAttrs)
-                    .draw(at: CGPoint(x: 3, y: y + 1))
+                drawText(NSAttributedString(string: "\(Int(lu))", attributes: labelAttrs),
+                         at: CGPoint(x: 3, y: y + 1), height: size.height)
                 lu += 10
             }
 
@@ -220,9 +220,14 @@ enum CGChart {
             return height * (1 - CGFloat(max(0, min(1, t)))) * 0.92 + height * 0.04
         }
 
+        let labelAttrs0: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 9),
+            .foregroundColor: NSColor.tertiaryLabelColor,
+        ]
         return { ctx, size in
             guard !balances.isEmpty, hasSignal else {
-                ChartCG.drawCenteredText(ctx, "нет сигнала", in: size)
+                drawText(NSAttributedString(string: "нет сигнала", attributes: labelAttrs0),
+                         at: CGPoint(x: size.width / 2 - 30, y: size.height / 2), height: size.height)
                 return
             }
 
@@ -269,12 +274,23 @@ enum CGChart {
                 let x = CGFloat(i) * slot + slot / 2
                 let str = NSAttributedString(string: balance.band.rawName, attributes: labelAttrs)
                 let b = str.boundingRect(with: size, options: [.usesLineFragmentOrigin])
-                str.draw(at: CGPoint(x: x - b.width / 2, y: 2))
+                drawText(str, at: CGPoint(x: x - b.width / 2, y: 2), height: size.height)
             }
         }
     }
 
     // MARK: - Примитивы
+
+    /// Текст: рисуется в перевернутых координатах (двойной флип локально).
+    private static func drawText(_ str: NSAttributedString, at point: CGPoint, height: CGFloat) {
+        NSGraphicsContext.saveGraphicsState()
+        let t = NSAffineTransform()
+        t.translateX(by: 0, yBy: height)
+        t.scaleX(by: 1, yBy: -1)
+        t.concat()
+        str.draw(at: CGPoint(x: point.x, y: height - point.y))
+        NSGraphicsContext.restoreGraphicsState()
+    }
 
     private static func stroke(_ ctx: CGContext, _ path: CGPath, color: NSColor,
                                width: CGFloat, alpha: CGFloat = 1, dash: [CGFloat]? = nil, roundJoin: Bool = false) {
