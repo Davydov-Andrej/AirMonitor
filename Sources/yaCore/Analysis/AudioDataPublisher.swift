@@ -97,6 +97,11 @@ public final class AudioDataPublisher: @unchecked Sendable {
     private let analysisQueue = DispatchQueue(label: "airmonitor.analysis", qos: .userInteractive)
     private let lock = NSLock()
 
+    /// Таймер публикации: снимки уходят в UI по часам, независимо от ритма
+    /// входных кадров. Иначе пропуск кадров (дроп в bounded-очереди) = «паузы»
+    /// в графике АЧХ.
+    private var publishTimer: DispatchSourceTimer?
+
     private var buses: [BusID: BusRuntime] = [:]
     private var deviceRates: [AudioDeviceID: Double] = [:]
     /// Резолв UID → deviceID из последнего списка устройств.
@@ -173,11 +178,32 @@ public final class AudioDataPublisher: @unchecked Sendable {
     }
 
     public func start() -> AudioError? {
-        deviceEngine.startAll()
+        startPublishTimer()
+        return deviceEngine.startAll()
     }
 
     public func stop() {
+        stopPublishTimer()
         deviceEngine.stopAll()
+    }
+
+    /// Пульс публикации: метрики уходят в UI равномерно, даже если кадры
+    /// с устройства идут рвано (или временно отсутствуют).
+    private func startPublishTimer() {
+        stopPublishTimer()
+        let timer = DispatchSource.makeTimerSource(queue: analysisQueue)
+        let interval = 1.0 / max(settings.updateRateHz, 5)
+        timer.schedule(deadline: .now(), repeating: interval, leeway: .milliseconds(2))
+        timer.setEventHandler { [weak self] in
+            self?.maybePublish()
+        }
+        timer.resume()
+        publishTimer = timer
+    }
+
+    private func stopPublishTimer() {
+        publishTimer?.cancel()
+        publishTimer = nil
     }
 
     /// Число активных шин (для UI).

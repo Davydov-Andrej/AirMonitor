@@ -26,6 +26,7 @@ public final class ChannelAnalyzerSet {
         self.dynamics = DynamicsAnalyzer()
         self.loudness = LoudnessMeter(sampleRate: Double(sampleRate))
         self.rta = RTASpectrumAnalyzer(length: fftLength, sampleRate: sampleRate, windowType: windowType)
+        self.loudness.shortTermSeconds = 1.0
     }
 
     public init(channelIndex: Int, label: String, sampleRate: Float, fftLength: Int, windowType: FFT.WindowType = .hann, rtaSettings: RTASettings = .default) {
@@ -36,6 +37,7 @@ public final class ChannelAnalyzerSet {
         self.dynamics = DynamicsAnalyzer()
         self.loudness = LoudnessMeter(sampleRate: Double(sampleRate))
         self.rta = RTASpectrumAnalyzer(length: fftLength, sampleRate: sampleRate, settings: rtaSettings, windowType: windowType)
+        self.loudness.shortTermSeconds = rtaSettings.shortTermSeconds
     }
 
     public func process(_ samples: [Float], sampleRate: Float) {
@@ -50,6 +52,7 @@ public final class ChannelAnalyzerSet {
 
     /// Применяет новые настройки RTA немедленно (без пересоздания).
     public func applyRTASettings(_ settings: RTASettings) {
+        loudness.shortTermSeconds = settings.shortTermSeconds
         rta.updateSettings(settings)
         lastSpectrumDirty = true
     }

@@ -51,29 +51,33 @@ public struct RTASettings: Sendable {
     public var peakHoldSeconds: Float
     /// Высокое разрешение кривой (1/24 октавы) поверх октавных полос.
     public var showFineCurve: Bool
+    /// Окно short-term громкости в секундах (по умолчанию 1 с).
+    public var shortTermSeconds: Double
 
     public init(
         bandsPerOctave: Int = 3,
         attack: Float = 0.8,
         release: Float = 0.08,
         peakHoldSeconds: Float = 1.5,
-        showFineCurve: Bool = true
+        showFineCurve: Bool = true,
+        shortTermSeconds: Double = 1.0
     ) {
         self.bandsPerOctave = bandsPerOctave
         self.attack = attack
         self.release = release
         self.peakHoldSeconds = peakHoldSeconds
         self.showFineCurve = showFineCurve
+        self.shortTermSeconds = shortTermSeconds
     }
 
     public static let `default` = RTASettings()
 
     /// Пресеты скорости отклика (как Peak/Slow Average на пультах).
     public static let presets: [(name: String, settings: RTASettings)] = [
-        ("Пики (мгновенно)", RTASettings(bandsPerOctave: 3, attack: 0.95, release: 0.4, peakHoldSeconds: 1.5, showFineCurve: true)),
-        ("Быстрый (по умолчанию)", RTASettings(bandsPerOctave: 3, attack: 0.8, release: 0.08, peakHoldSeconds: 1.5, showFineCurve: true)),
-        ("Средний", RTASettings(bandsPerOctave: 3, attack: 0.4, release: 0.03, peakHoldSeconds: 2.0, showFineCurve: true)),
-        ("Медленный (усреднение)", RTASettings(bandsPerOctave: 3, attack: 0.15, release: 0.01, peakHoldSeconds: 3.0, showFineCurve: false)),
+        ("Пики (мгновенно)", RTASettings(bandsPerOctave: 3, attack: 0.95, release: 0.4, peakHoldSeconds: 1.5, showFineCurve: true, shortTermSeconds: 1.0)),
+        ("Быстрый (по умолчанию)", RTASettings(bandsPerOctave: 3, attack: 0.8, release: 0.08, peakHoldSeconds: 1.5, showFineCurve: true, shortTermSeconds: 1.0)),
+        ("Средний", RTASettings(bandsPerOctave: 3, attack: 0.4, release: 0.03, peakHoldSeconds: 2.0, showFineCurve: true, shortTermSeconds: 1.0)),
+        ("Медленный (усреднение)", RTASettings(bandsPerOctave: 3, attack: 0.15, release: 0.01, peakHoldSeconds: 3.0, showFineCurve: false, shortTermSeconds: 1.0)),
     ]
 }
 

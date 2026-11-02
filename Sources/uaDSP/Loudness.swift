@@ -69,6 +69,14 @@ public final class LoudnessMeter {
 
     private let lock = NSLock()
 
+    /// Окно short-term в секундах (стандарт EBU — 3 с; настраивается).
+    public var shortTermSeconds: Double = 1.0 {
+        didSet {
+            shortTermBlocks = max(1, Int(shortTermSeconds / 0.1))
+        }
+    }
+    private var shortTermBlocks: Int = 10
+
     public init(sampleRate: Double) {
         self.sampleRate = sampleRate
         self.kFilter = KWeightingFilter(sampleRate: Float(sampleRate))
@@ -154,8 +162,8 @@ public final class LoudnessMeter {
         // Momentary: последние 4 подблока (400 мс).
         momentary = windowLoudness(last: 4)
 
-        // Short-term: последние 30 подблоков (3 с).
-        shortTerm = windowLoudness(last: 30)
+        // Short-term: окно shortTermSeconds (по умолчанию 1 с).
+        shortTerm = windowLoudness(last: shortTermBlocks)
 
         // История 10 Гц.
         let hp = HistoryPoint(momentary: momentary, shortTerm: shortTerm, peak: truePeakDB)

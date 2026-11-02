@@ -73,6 +73,19 @@ struct SpectrumView: View {
                 ))
 
                 Toggle("Тонкая кривая (детальные пики EQ)", isOn: $model.rtaSettings.showFineCurve)
+
+                Divider()
+
+                // Окно short-term громкости (метрика S).
+                Picker("Окно S", selection: Binding(
+                    get: { model.rtaSettings.shortTermSeconds },
+                    set: { model.rtaSettings.shortTermSeconds = $0 }
+                )) {
+                    Text("0.4 с").tag(0.4)
+                    Text("1 с (по умолчанию)").tag(1.0)
+                    Text("3 с (стандарт EBU)").tag(3.0)
+                }
+                .pickerStyle(.inline)
             } label: {
                 Label("Полосы: 1/\(model.rtaSettings.bandsPerOctave) окт", systemImage: "slider.horizontal.3")
             }

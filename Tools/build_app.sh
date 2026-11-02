@@ -10,9 +10,14 @@ echo "==> Сборка (release)..."
 swift build -c release --product air-monitor
 
 APP_BUNDLE="dist/$APP_NAME.app"
-rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_BUNDLE/Contents/MacOS"
-mkdir -p "$APP_BUNDLE/Contents/Resources"
+# Обновляем бандл НА МЕСТЕ (не пересоздавая): TCC привязывает mic-разрешение
+# к adhoc-подписи, а её cdhash меняется при каждой новой сборке. Если удалять
+# и создавать бандл заново, macOS считает это новым приложением и сбрасывает
+# разрешение на микрофон.
+if [ ! -d "$APP_BUNDLE" ]; then
+    mkdir -p "$APP_BUNDLE/Contents/MacOS"
+    mkdir -p "$APP_BUNDLE/Contents/Resources"
+fi
 
 cp "$BIN" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
@@ -45,6 +50,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --sign - "$APP_BUNDLE" >/dev/null 2>&1 || true
+codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null 2>&1 || true
 
 echo "==> Готово: $APP_BUNDLE"
+echo "    (бандл обновлён на месте — mic-разрешение TCC сохраняется)"
