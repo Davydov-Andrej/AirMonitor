@@ -250,10 +250,9 @@ public final class AudioDataPublisher: @unchecked Sendable {
 
     private var busOrder: [BusID] = []
 
-    private func orderedSnapshots(_ snapshots: [BusSnapshot]) -> [BusSnapshot] {
-        lock.lock()
+    /// Вызывается ТОЛЬКО когда lock уже удерживается (из maybePublish).
+    private func orderedSnapshotsLocked(_ snapshots: [BusSnapshot]) -> [BusSnapshot] {
         let order = busOrder
-        lock.unlock()
         guard !order.isEmpty else { return snapshots }
         let byID = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.id, $0) })
         var result: [BusSnapshot] = []
@@ -285,7 +284,7 @@ public final class AudioDataPublisher: @unchecked Sendable {
             busSnapshots.append(snap)
         }
         let app = AppSnapshot(
-            buses: orderedSnapshots(busSnapshots),
+            buses: orderedSnapshotsLocked(busSnapshots),
             integratedLUFS: lufs.isEmpty ? -Float.infinity : lufs.reduce(0, +) / Float(lufs.count),
             loudnessRangeLU: 0,
             timestamp: now
