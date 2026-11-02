@@ -33,25 +33,39 @@ struct LoudnessHistoryChart: View {
                 drawSeries(context: context, size: size, points: leftHistory, capacity: capacity,
                            color: .red, fill: false)
                 drawSeries(context: context, size: size, points: rightHistory, capacity: capacity,
-                           color: .blue, fill: false)
+                            color: .blue, fill: false)
             } else {
                 drawSeries(context: context, size: size, points: monoHistory, capacity: capacity,
                            color: .blue, fill: true)
             }
+        }
+        .overlay(alignment: .topLeading) {
+            // Статичные подписи LU (рисуются один раз, не в каждом кадре).
+            let luLabels: [Int] = [-10, -20, -30]
+            GeometryReader { geo in
+                ZStack(alignment: .topLeading) {
+                    ForEach(luLabels, id: \.self) { lu in
+                        Text("\(lu)")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.secondary)
+                            .offset(x: 3, y: yPos(Float(lu), size: geo.size) + 1)
+                    }
+                }
+            }
+            .allowsHitTesting(false)
         }
         .background(Color.black.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     private func drawGrid(context: GraphicsContext, size: CGSize) {
+        // Только линии; подписи LU — в статичном оверлее (Text в Canvas дорог).
         for lu in stride(from: minLU + 10, to: maxLU, by: 10) {
             let y = yPos(lu, size: size)
             var grid = Path()
             grid.move(to: CGPoint(x: 0, y: y))
             grid.addLine(to: CGPoint(x: size.width, y: y))
             context.stroke(grid, with: .color(.gray.opacity(0.15)), lineWidth: 0.5)
-            let text = Text("\(Int(lu))").font(.system(size: 8)).foregroundStyle(.secondary)
-            context.draw(text, at: CGPoint(x: 3, y: y + 2), anchor: .topLeading)
         }
         let targetY = yPos(target, size: size)
         var targetPath = Path()
@@ -105,7 +119,8 @@ struct LoudnessHistoryChart: View {
     }
 }
 
-/// Спектр: тонкая кривая (1/24 октавы) + октавные полосы (bars) поверх.
+/// Спектр: тонкая кривая + октавные полосы. Подписи осей — статичный слой
+/// поверх Canvas (Text внутри Canvas ресолвится каждый кадр — дорого).
 struct SpectrumCurveChart: View {
     let fine: [SpectrumPoint]
     let bands: [RTABand]
@@ -113,29 +128,29 @@ struct SpectrumCurveChart: View {
     private let minDB: Float = -90
     private let maxDB: Float = 10
 
+    private static let freqLabels: [(Float, String)] = [
+        (63, "63"), (250, "250"), (1000, "1k"), (4000, "4k"), (16000, "16k")
+    ]
+    private static let dbLabels: [Int] = [10, -2, -14, -26, -38, -50, -62, -74, -86]
+
     var body: some View {
         Canvas { context, size in
-            // Сетка + подписи дБ по Y
-            for db in stride(from: maxDB, to: minDB, by: -12) {
-                let y = yPos(db, size: size)
+            // Сетка по Y (без текста — текст в оверлее)
+            for db in Self.dbLabels {
+                let y = yPos(Float(db), size: size)
                 var line = Path()
                 line.move(to: CGPoint(x: 0, y: y))
                 line.addLine(to: CGPoint(x: size.width, y: y))
                 context.stroke(line, with: .color(.gray.opacity(0.15)), lineWidth: 0.5)
-                let text = Text("\(Int(db))").font(.system(size: 8)).foregroundStyle(.secondary)
-                context.draw(text, at: CGPoint(x: 4, y: y + 2), anchor: .topLeading)
             }
 
-            // Подписи частот (лог-шкала)
-            let labels: [(Float, String)] = [(63, "63"), (250, "250"), (1000, "1k"), (4000, "4k"), (16000, "16k")]
-            for (freq, label) in labels {
+            // Тики частот (без текста)
+            for (freq, _) in Self.freqLabels {
                 let fx = xPos(freq, width: size.width)
                 var tick = Path()
                 tick.move(to: CGPoint(x: fx, y: 0))
                 tick.addLine(to: CGPoint(x: fx, y: size.height))
                 context.stroke(tick, with: .color(.gray.opacity(0.12)), lineWidth: 0.5)
-                let text = Text(label).font(.system(size: 8)).foregroundStyle(.secondary)
-                context.draw(text, at: CGPoint(x: fx + 3, y: size.height - 8), anchor: .topLeading)
             }
 
             // Октавные полосы (ленты позади кривой)
@@ -168,6 +183,36 @@ struct SpectrumCurveChart: View {
                     }
                 }
                 context.stroke(path, with: .color(.accentColor), style: StrokeStyle(lineWidth: 1.6, lineJoin: .round))
+            }
+        }
+        .overlay {
+            // Статичные подписи осей: рисуются один раз, не пересоздаются в кадрах.
+            GeometryReader { geo in
+                let w = geo.size.width
+                let h = geo.size.height
+                ZStack(alignment: .topLeading) {
+                    ForEach(Self.dbLabels, id: \.self) { db in
+                        Text("\(db)")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            .offset(
+                                x: 4,
+                                y: yPos(Float(db), size: CGSize(width: w, height: h)) + 1
+                            )
+                    }
+                    ForEach(Self.freqLabels, id: \.1) { freq, label in
+                        Text(label)
+                            .font(.system(size: 8))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                            .offset(
+                                x: xPos(freq, width: w) + 3,
+                                y: h - 14
+                            )
+                    }
+                }
+                .allowsHitTesting(false)
             }
         }
         .background(Color.black.opacity(0.04))
@@ -251,12 +296,20 @@ struct TonalBalanceChart: View {
                 let rect = CGRect(x: x - 3, y: y - 3, width: 6, height: 6)
                 context.fill(Path(ellipseIn: rect), with: .color(balance.deviationDB > 0 ? .red : .orange))
             }
-
-            // Подписи полос внизу
-            for (i, balance) in balances.enumerated() where i % 2 == 0 {
-                let x = CGFloat(i) * slot + slot / 2
-                let text = Text(balance.band.rawName).font(.system(size: 7)).foregroundStyle(.secondary)
-                context.draw(text, at: CGPoint(x: x, y: size.height - 7))
+        }
+        .overlay(alignment: .bottom) {
+            // Подписи полос — статичный слой (Text в Canvas дорог).
+            GeometryReader { geo in
+                let slot = geo.size.width / CGFloat(max(balances.count, 1))
+                HStack(spacing: 0) {
+                    ForEach(Array(balances.enumerated()), id: \.element.band.rawName) { _, balance in
+                        Text(balance.band.rawName)
+                            .font(.system(size: 7))
+                            .foregroundStyle(.secondary)
+                            .frame(width: slot)
+                    }
+                }
+                .allowsHitTesting(false)
             }
         }
         .background(Color.black.opacity(0.04))

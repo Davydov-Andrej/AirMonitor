@@ -505,11 +505,15 @@ struct MetricsColumn: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
+            // Громкость — первичные метрики: сверху, крупно, жирно.
+            lufsRow("M", "громк. 400мс", snapshot?.momentaryLUFS)
+            lufsRow("S", "громк. 3с", snapshot?.shortTermLUFS)
+            Divider()
+                .frame(height: 0.5)
+                .padding(.vertical, 1)
             metricRow("Peak", "пик", snapshot?.peakDB)
             metricRow("RMS", "среднее", snapshot?.rmsDB)
             metricRow("TruePk", "ист. пик", snapshot?.truePeakDB)
-            metricRow("M", "громк. 400мс", snapshot?.momentaryLUFS)
-            metricRow("S", "громк. 3с", snapshot?.shortTermLUFS)
             metricRow("I", "громк. эфира", snapshot?.integratedLUFS)
             metricRow("LRA", "разброс", snapshot?.loudnessRangeLU)
             ForEach(extraMetrics, id: \.0) { m in
@@ -517,6 +521,25 @@ struct MetricsColumn: View {
             }
         }
         .frame(minWidth: 118, alignment: .leading)
+    }
+
+    /// Выделенная строка громкости: крупнее и жирнее обычных метрик.
+    @ViewBuilder
+    private func lufsRow(_ name: String, _ hint: String, _ value: Float?) -> some View {
+        HStack(spacing: 4) {
+            Text(showHints ? "\(name) (\(hint))" : name)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Spacer()
+            if let value, value.isFinite {
+                Text(String(format: "%.1f", value))
+                    .font(.system(size: 14, design: .monospaced).weight(.bold))
+            } else {
+                Text("--")
+                    .font(.system(size: 14, design: .monospaced).weight(.bold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
     }
 
     @ViewBuilder
