@@ -72,13 +72,13 @@ public struct ChannelSnapshot: Identifiable, Sendable {
 public final class AudioDataPublisher: @unchecked Sendable {
 
     public struct Settings {
-        public var fftLength: Int = 8192
+        public var fftLength: Int = 4096
         public var updateRateHz: Double = 15
         public var windowType: FFT.WindowType = .hann
         public var rta: RTASettings = .default
 
         public init(
-            fftLength: Int = 8192,
+            fftLength: Int = 4096,
             updateRateHz: Double = 15,
             windowType: FFT.WindowType = .hann,
             rta: RTASettings = .default

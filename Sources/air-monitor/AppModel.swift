@@ -349,7 +349,7 @@ final class AppModel: ObservableObject {
         }
 
         let publisher = AudioDataPublisher(
-            settings: .init(fftLength: 8192, updateRateHz: updateRateHz, windowType: .hann, rta: rtaSettings)
+            settings: .init(fftLength: 4096, updateRateHz: updateRateHz, windowType: .hann, rta: rtaSettings)
         )
         publisher.updateDeviceMap(devices)
         publisher.setOnSnapshot { [weak self] snapshot in
