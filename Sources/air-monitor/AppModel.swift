@@ -260,6 +260,7 @@ final class AppModel: ObservableObject {
                 _ = publisher.addBus(config)
             }
         }
+        syncBusOrder()
 
         isPresentingAddBus = false
         editingBusID = nil
@@ -271,6 +272,7 @@ final class AppModel: ObservableObject {
     func removeBus(id: BusID) {
         buses.removeAll { $0.config.id == id }
         publisher?.removeBus(id: id)
+        syncBusOrder()
         autosaveCurrentScene()
     }
 
@@ -288,18 +290,21 @@ final class AppModel: ObservableObject {
     /// Переместить шину (порядок отображения).
     func moveBus(from offsets: IndexSet, to destination: Int) {
         buses.move(fromOffsets: offsets, toOffset: destination)
+        syncBusOrder()
         autosaveCurrentScene()
     }
 
     func moveBusUp(id: BusID) {
         guard let index = buses.firstIndex(where: { $0.id == id }), index > 0 else { return }
         buses.swapAt(index, index - 1)
+        syncBusOrder()
         autosaveCurrentScene()
     }
 
     func moveBusDown(id: BusID) {
         guard let index = buses.firstIndex(where: { $0.id == id }), index < buses.count - 1 else { return }
         buses.swapAt(index, index + 1)
+        syncBusOrder()
         autosaveCurrentScene()
     }
 
@@ -313,6 +318,12 @@ final class AppModel: ObservableObject {
         guard let index = buses.firstIndex(where: { $0.id == id }) else { return }
         buses[index].config.spectrumWidthFraction = max(0.25, min(0.75, fraction))
         autosaveCurrentScene()
+    }
+
+    /// Синхронизирует порядок шин в паблишере — все вкладки показывают
+    /// одинаковый порядок.
+    private func syncBusOrder() {
+        publisher?.setBusOrder(buses.map { $0.id })
     }
 
     private func defaultName(for device: AudioDeviceInfo, mode: BusMode) -> String {
@@ -343,7 +354,7 @@ final class AppModel: ObservableObject {
         publisher.updateDeviceMap(devices)
         publisher.setOnSnapshot { [weak self] snapshot in
             Task { @MainActor in
-                self?.snapshot = snapshot
+                self?.applySnapshot(snapshot)
             }
         }
 
@@ -364,8 +375,24 @@ final class AppModel: ObservableObject {
         self.publisher = publisher
         isCapturing = true
         errorMessage = nil
+        syncBusOrder()
         EngineLog.log("startCapture: шин \(buses.count)")
     }
+
+    /// Применяет снимок, обновляя только изменившиеся шины.
+    private func applySnapshot(_ newSnapshot: AppSnapshot) {
+        // Порядок/состав шин изменился — полное обновление (редко).
+        if newSnapshot.buses.map(\.id) != snapshot.buses.map(\.id) {
+            snapshot = newSnapshot
+        }
+
+        for bus in newSnapshot.buses {
+            let holder = holders[bus.id]
+            holder?.snapshot = bus
+        }
+    }
+
+    private var holders: [BusID: BusSnapshotHolder] = [:]
 
     func stopCapture() {
         isCapturing = false
@@ -473,5 +500,24 @@ final class MonitorBus: ObservableObject, Identifiable {
 extension AppModel {
     func busPreview(for bus: MonitorBus) -> BusSnapshot? {
         snapshot.bus(id: bus.id)
+    }
+
+    /// Холдер снимка шины для изолированных обновлений карточки.
+    func holder(for bus: MonitorBus) -> BusSnapshotHolder {
+        if let h = holders[bus.id] { return h }
+        let h = BusSnapshotHolder(id: bus.id)
+        holders[bus.id] = h
+        return h
+    }
+}
+
+/// ObservableObject-обёртка снимка одной шины: карточка перерисовывается
+/// только когда обновился именно её снимок.
+final class BusSnapshotHolder: ObservableObject {
+    @Published var snapshot: BusSnapshot?
+    let id: BusID
+
+    init(id: BusID) {
+        self.id = id
     }
 }

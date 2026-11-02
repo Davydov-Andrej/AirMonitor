@@ -1,6 +1,10 @@
 import SwiftUI
 import yaCore
 
+extension InstrumentBalance: Identifiable {
+    public var id: String { band.rawName }
+}
+
 /// Бегущий график громкости: окно последних N секунд. Режимы:
 /// моно (M/S-заливка+линия), стерео (3 линии: стерео, L, R).
 struct LoudnessHistoryChart: View {

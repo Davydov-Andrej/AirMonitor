@@ -1,7 +1,7 @@
 import SwiftUI
 import yaCore
 
-/// Спектр: общая панель настроек RTA сверху + график на шину.
+/// Спектр: общая панель настроек RTA + график на шину (порядок = дашборд).
 struct SpectrumView: View {
     @EnvironmentObject var model: AppModel
 
@@ -13,24 +13,18 @@ struct SpectrumView: View {
                 Spacer()
                 rtaSettingsMenu
             }
-            if model.snapshot.buses.isEmpty {
+            if model.buses.isEmpty {
                 ContentUnavailableView(
-                    "Нет данных",
+                    "Нет шин",
                     systemImage: "waveform",
-                    description: Text("Запустите захват (Старт), чтобы увидеть спектры")
+                    description: Text("Добавьте шину на дашборде и запустите захват")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     VStack(spacing: 16) {
-                        ForEach(model.snapshot.buses) { bus in
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(bus.name)
-                                    .font(.headline)
-                                ForEach(bus.displayChannels) { channel in
-                                    SpectrumChannelCard(channel: channel)
-                                }
-                            }
+                        ForEach(model.buses) { bus in
+                            SpectrumBusCardContainer(bus: bus, holder: model.holder(for: bus))
                         }
                     }
                 }
@@ -100,13 +94,33 @@ struct SpectrumView: View {
     }
 }
 
-struct SpectrumChannelCard: View {
-    let channel: ChannelSnapshot
+struct SpectrumBusCardContainer: View {
+    let bus: MonitorBus
+    @ObservedObject var holder: BusSnapshotHolder
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SpectrumCurveChart(fine: channel.fineCurve, bands: channel.rtaBands)
-                .frame(height: 240)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(bus.config.name)
+                    .font(.headline)
+                if !bus.isConnected {
+                    Label("устройство отключено", systemImage: "cable.connector.slash")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
+                Spacer()
+            }
+            if let snapshot = holder.snapshot {
+                ForEach(snapshot.displayChannels) { channel in
+                    SpectrumCurveChart(fine: channel.fineCurve, bands: channel.rtaBands)
+                        .frame(height: 200)
+                }
+            } else {
+                Text("ожидает «Старт»")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .frame(maxWidth: .infinity, minHeight: 60)
+            }
         }
         .padding()
         .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))

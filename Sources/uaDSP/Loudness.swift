@@ -58,7 +58,8 @@ public final class LoudnessMeter {
 
     /// История 10 Гц.
     public private(set) var history: [HistoryPoint] = []
-    public var historyCapacity: Int = 600  // 60 секунд по умолчанию
+    /// 30 секунд (окно графика 15 с + запас).
+    public var historyCapacity: Int = 300
 
     public private(set) var momentary: Float = -Float.infinity
     public private(set) var shortTerm: Float = -Float.infinity

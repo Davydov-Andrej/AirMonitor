@@ -39,12 +39,9 @@ struct DashboardView: View {
                 ScrollView {
                     VStack(spacing: 14) {
                         ForEach(model.buses) { bus in
-                            BusDashboardCard(
-                                id: bus.id,
-                                name: bus.config.name,
-                                mode: bus.config.mode,
-                                snapshot: model.busPreview(for: bus),
-                                isConnected: bus.isConnected,
+                            BusDashboardCardContainer(
+                                bus: bus,
+                                holder: model.holder(for: bus),
                                 onDelete: { model.removeBus(id: bus.id) },
                                 onRename: { newName in model.renameBus(id: bus.id, to: newName) },
                                 onEdit: { model.beginEditBus(id: bus.id) },
@@ -53,7 +50,6 @@ struct DashboardView: View {
                                 onResizeSpectrum: { fraction in
                                     model.setBusSpectrumFraction(id: bus.id, fraction: fraction)
                                 },
-                                spectrumFraction: bus.config.spectrumWidthFraction,
                                 canMoveUp: model.buses.first?.id != bus.id,
                                 canMoveDown: model.buses.last?.id != bus.id
                             )
@@ -128,6 +124,40 @@ struct SaveSceneSheet: View {
             }
         }
         .padding()
+    }
+}
+
+/// Изолированный контейнер карточки: перерисовывается только при обновлении
+/// снимка СВОЕЙ шины, а не всего дашборда.
+struct BusDashboardCardContainer: View {
+    let bus: MonitorBus
+    @ObservedObject var holder: BusSnapshotHolder
+    let onDelete: () -> Void
+    let onRename: (String) -> Void
+    var onEdit: () -> Void = {}
+    var onMoveUp: () -> Void = {}
+    var onMoveDown: () -> Void = {}
+    var onResizeSpectrum: (Double) -> Void = { _ in }
+    var canMoveUp: Bool = false
+    var canMoveDown: Bool = false
+
+    var body: some View {
+        BusDashboardCard(
+            id: bus.id,
+            name: bus.config.name,
+            mode: bus.config.mode,
+            snapshot: holder.snapshot,
+            isConnected: bus.isConnected,
+            onDelete: onDelete,
+            onRename: onRename,
+            onEdit: onEdit,
+            onMoveUp: onMoveUp,
+            onMoveDown: onMoveDown,
+            onResizeSpectrum: onResizeSpectrum,
+            spectrumFraction: bus.config.spectrumWidthFraction,
+            canMoveUp: canMoveUp,
+            canMoveDown: canMoveDown
+        )
     }
 }
 

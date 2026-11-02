@@ -1,29 +1,32 @@
 import SwiftUI
 import yaCore
 
-/// Монитор: метры + история громкости по всем шинам (та же вёрстка, что
-/// и дашборд, но без спектра/баланса).
+/// Монитор: метры + история громкости по всем шинам.
+/// Порядок шин — как на дашборде (model.buses), данные — из холдеров.
 struct MonitorView: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Уровни и динамика")
-                .font(.title2)
-            if model.snapshot.buses.isEmpty {
-                ContentUnavailableView("Нет данных", systemImage: "waveform", description: Text("Запустите захват (Старт)"))
+            HStack {
+                Text("Уровни и динамика")
+                    .font(.title2)
+                Spacer()
+            }
+            if model.buses.isEmpty {
+                ContentUnavailableView("Нет шин", systemImage: "waveform", description: Text("Добавьте шину на дашборде и запустите захват"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     VStack(spacing: 14) {
-                        let busList = model.snapshot.buses
-                        ForEach(Array(zip(busList.indices, busList)), id: \.1.id) { index, bus in
-                            MonitorBusRow(
+                        ForEach(Array(model.buses.enumerated()), id: \.element.id) { index, bus in
+                            MonitorBusRowContainer(
                                 bus: bus,
-                                onMoveUp: { model.moveBusSnapshot(id: bus.id, delta: -1) },
-                                onMoveDown: { model.moveBusSnapshot(id: bus.id, delta: 1) },
+                                holder: model.holder(for: bus),
+                                onMoveUp: { model.moveBusUp(id: bus.id) },
+                                onMoveDown: { model.moveBusDown(id: bus.id) },
                                 canMoveUp: index > 0,
-                                canMoveDown: index < busList.count - 1
+                                canMoveDown: index < model.buses.count - 1
                             )
                         }
                     }
@@ -34,22 +37,51 @@ struct MonitorView: View {
     }
 }
 
-struct MonitorBusRow: View {
-    let bus: BusSnapshot
+/// Изолированный контейнер: обновляется только при изменении снимка шины.
+struct MonitorBusRowContainer: View {
+    let bus: MonitorBus
+    @ObservedObject var holder: BusSnapshotHolder
     var onMoveUp: () -> Void = {}
     var onMoveDown: () -> Void = {}
     var canMoveUp: Bool = false
     var canMoveDown: Bool = false
     @EnvironmentObject var model: AppModel
 
+    var body: some View {
+        MonitorBusRow(
+            busName: bus.config.name,
+            busMode: bus.config.mode,
+            snapshot: holder.snapshot,
+            isConnected: bus.isConnected,
+            showHints: model.showMetricHints,
+            onMoveUp: onMoveUp,
+            onMoveDown: onMoveDown,
+            canMoveUp: canMoveUp,
+            canMoveDown: canMoveDown
+        )
+    }
+}
+
+struct MonitorBusRow: View {
+    let busName: String
+    let busMode: BusMode
+    let snapshot: BusSnapshot?
+    var isConnected: Bool = true
+    var showHints: Bool = false
+    var onMoveUp: () -> Void = {}
+    var onMoveDown: () -> Void = {}
+    var canMoveUp: Bool = false
+    var canMoveDown: Bool = false
+
     var isStereo: Bool {
-        if case .stereo = bus.mode { return true }
+        if case .stereo = busMode { return true }
         return false
     }
 
     var summary: ChannelSnapshot? {
-        if isStereo { return bus.mono ?? bus.channels.first }
-        return bus.channels.first
+        guard let snapshot else { return nil }
+        if isStereo { return snapshot.mono ?? snapshot.channels.first }
+        return snapshot.channels.first
     }
 
     var body: some View {
@@ -72,12 +104,17 @@ struct MonitorBusRow: View {
                     .disabled(!canMoveDown)
                 }
 
-                Text(bus.name).font(.headline)
+                Text(busName).font(.headline)
                 Text(modeLabel)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if !isConnected {
+                    Label("устройство отключено", systemImage: "cable.connector.slash")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
                 Spacer()
-                if let correlation = bus.correlation {
+                if let correlation = snapshot?.correlation {
                     Text(String(format: "Корр. L/R: %.2f", correlation))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
@@ -86,19 +123,22 @@ struct MonitorBusRow: View {
 
             HStack(alignment: .top, spacing: 14) {
                 if isStereo {
-                    StereoMeterPair(left: bus.channels.first, right: bus.channels.dropFirst().first)
+                    StereoMeterPair(
+                        left: snapshot?.channels.first,
+                        right: snapshot?.channels.dropFirst().first
+                    )
                 } else {
                     SingleMeter(snapshot: summary)
                 }
                 MetricsColumn(
                     title: "",
                     snapshot: summary,
-                    showHints: model.showMetricHints
+                    showHints: showHints
                 )
                 LoudnessHistoryChart(
                     monoHistory: summary?.loudnessHistory ?? [],
-                    leftHistory: isStereo ? bus.channels.first?.loudnessHistory ?? [] : [],
-                    rightHistory: isStereo ? bus.channels.dropFirst().first?.loudnessHistory ?? [] : [],
+                    leftHistory: isStereo ? snapshot?.channels.first?.loudnessHistory ?? [] : [],
+                    rightHistory: isStereo ? snapshot?.channels.dropFirst().first?.loudnessHistory ?? [] : [],
                     target: -23,
                     windowSeconds: 15
                 )
@@ -111,7 +151,7 @@ struct MonitorBusRow: View {
     }
 
     private var modeLabel: String {
-        switch bus.mode {
+        switch busMode {
         case .stereo(let l, let r): return "Стерео \(l + 1)/\(r + 1)"
         case .mono(let ch): return "Моно " + ch.map { "\($0 + 1)" }.joined(separator: "+")
         }

@@ -241,6 +241,32 @@ public final class AudioDataPublisher: @unchecked Sendable {
         }
     }
 
+    /// Задаёт порядок шин в снапшоте (вызывается из UI при перемещении).
+    public func setBusOrder(_ ids: [BusID]) {
+        lock.lock()
+        busOrder = ids
+        lock.unlock()
+    }
+
+    private var busOrder: [BusID] = []
+
+    private func orderedSnapshots(_ snapshots: [BusSnapshot]) -> [BusSnapshot] {
+        lock.lock()
+        let order = busOrder
+        lock.unlock()
+        guard !order.isEmpty else { return snapshots }
+        let byID = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.id, $0) })
+        var result: [BusSnapshot] = []
+        for id in order {
+            if let s = byID[id] { result.append(s) }
+        }
+        // Шины без заданного порядка — в конец.
+        for s in snapshots where !order.contains(s.id) {
+            result.append(s)
+        }
+        return result
+    }
+
     private func maybePublish() {
         lock.lock()
         let now = Date()
@@ -259,7 +285,7 @@ public final class AudioDataPublisher: @unchecked Sendable {
             busSnapshots.append(snap)
         }
         let app = AppSnapshot(
-            buses: busSnapshots.sorted { $0.name.lowercased() < $1.name.lowercased() },
+            buses: orderedSnapshots(busSnapshots),
             integratedLUFS: lufs.isEmpty ? -Float.infinity : lufs.reduce(0, +) / Float(lufs.count),
             loudnessRangeLU: 0,
             timestamp: now
