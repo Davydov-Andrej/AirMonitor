@@ -39,38 +39,40 @@ struct BalanceBusCardContainer: View {
     @ObservedObject var holder: BusSnapshotHolder
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(bus.config.name)
-                    .font(.headline)
-                if !bus.isConnected {
-                    Label("устройство отключено", systemImage: "cable.connector.slash")
-                        .font(.caption2)
-                        .foregroundStyle(.red)
+        TimelineView(.periodic(from: .now, by: 0.05)) { _ in
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(bus.config.name)
+                        .font(.headline)
+                    if !bus.isConnected {
+                        Label("устройство отключено", systemImage: "cable.connector.slash")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    }
+                    Spacer()
+                    if let correlation = holder.snapshot?.correlation {
+                        Text(String(format: "Корр. L/R: %.2f", correlation))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                Spacer()
-                if let correlation = holder.snapshot?.correlation {
-                    Text(String(format: "Корр. L/R: %.2f", correlation))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-            }
 
-            if let snapshot = holder.snapshot {
-                let summary = snapshot.mono ?? snapshot.channels.first
-                TonalBalanceChart(
-                    spectrum: summary?.rtaBands.map { SpectrumPoint(id: $0.id, frequency: $0.centerFrequency, magnitudeDB: $0.levelDB) } ?? [],
-                    sampleRate: Float(snapshot.sampleRate)
-                )
-                .frame(height: 180)
-            } else {
-                Text("ожидает «Старт»")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .frame(maxWidth: .infinity, minHeight: 60)
+                if let snapshot = holder.snapshot {
+                    let summary = snapshot.mono ?? snapshot.channels.first
+                    TonalBalanceChart(
+                        spectrum: summary?.rtaBands.map { SpectrumPoint(id: $0.id, frequency: $0.centerFrequency, magnitudeDB: $0.levelDB) } ?? [],
+                        sampleRate: Float(snapshot.sampleRate)
+                    )
+                    .frame(height: 180)
+                } else {
+                    Text("ожидает «Старт»")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, minHeight: 60)
+                }
             }
+            .padding()
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
         }
-        .padding()
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
     }
 }

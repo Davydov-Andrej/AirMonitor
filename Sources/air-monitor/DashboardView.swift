@@ -142,22 +142,26 @@ struct BusDashboardCardContainer: View {
     var canMoveDown: Bool = false
 
     var body: some View {
-        BusDashboardCard(
-            id: bus.id,
-            name: bus.config.name,
-            mode: bus.config.mode,
-            snapshot: holder.snapshot,
-            isConnected: bus.isConnected,
-            onDelete: onDelete,
-            onRename: onRename,
-            onEdit: onEdit,
-            onMoveUp: onMoveUp,
-            onMoveDown: onMoveDown,
-            onResizeSpectrum: onResizeSpectrum,
-            spectrumFraction: bus.config.spectrumWidthFraction,
-            canMoveUp: canMoveUp,
-            canMoveDown: canMoveDown
-        )
+        // Pull-отрисовка: Canvas обновляется по часам (20 Гц), читая последние
+        // данные. Джиттер доставки с DSP-очереди не влияет на кадровую частоту.
+        TimelineView(.periodic(from: .now, by: 0.05)) { _ in
+            BusDashboardCard(
+                id: bus.id,
+                name: bus.config.name,
+                mode: bus.config.mode,
+                snapshot: holder.snapshot,
+                isConnected: bus.isConnected,
+                onDelete: onDelete,
+                onRename: onRename,
+                onEdit: onEdit,
+                onMoveUp: onMoveUp,
+                onMoveDown: onMoveDown,
+                onResizeSpectrum: onResizeSpectrum,
+                spectrumFraction: bus.config.spectrumWidthFraction,
+                canMoveUp: canMoveUp,
+                canMoveDown: canMoveDown
+            )
+        }
     }
 }
 

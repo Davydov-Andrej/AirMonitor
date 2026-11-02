@@ -26,14 +26,14 @@ struct LoudnessHistoryChart: View {
             let capacity = Int(windowSeconds * stepHz)
             let stepX = size.width / CGFloat(max(capacity - 1, 1))
 
-            // Стерео-режим: 3 линии.
+            // Стерео-режим: заливка по суммарному сигналу + 3 линии.
             if !leftHistory.isEmpty || !rightHistory.isEmpty {
+                drawSeries(context: context, size: size, points: monoHistory, capacity: capacity,
+                           color: .blue, fill: true, lineWidth: 2)
                 drawSeries(context: context, size: size, points: leftHistory, capacity: capacity,
                            color: .red, fill: false)
                 drawSeries(context: context, size: size, points: rightHistory, capacity: capacity,
                            color: .blue, fill: false)
-                drawSeries(context: context, size: size, points: monoHistory, capacity: capacity,
-                           color: .primary.opacity(0.55), fill: false, lineWidth: 2)
             } else {
                 drawSeries(context: context, size: size, points: monoHistory, capacity: capacity,
                            color: .blue, fill: true)
@@ -69,61 +69,34 @@ struct LoudnessHistoryChart: View {
         let stepX = size.width / CGFloat(max(capacity - 1, 1))
         let offset = CGFloat(capacity - points.count)
 
+        // Тишина (−∞) зажимается в низ шкалы — ровная «полка» вместо дыр.
+        func y(_ lu: Float) -> CGFloat {
+            let floorLU = minLU + 1  // чуть выше оси, чтобы полка была видна
+            let clamped = lu.isFinite ? max(minLU, min(maxLU, lu)) : floorLU
+            return size.height * (1 - CGFloat((clamped - minLU) / (maxLU - minLU)))
+        }
+
         if fill {
-            // Заливка только по непрерывным участкам (дыры −∞ разрывают путь).
-            var segments: [[(Int, Float)]] = []
-            var current: [(Int, Float)] = []
-            for (i, p) in points.enumerated() where p.shortTerm.isFinite {
-                if let last = current.last, i > last.0 + 1, !current.isEmpty {
-                    segments.append(current)
-                    current = []
-                }
-                current.append((i, p.shortTerm))
+            var path = Path()
+            path.move(to: CGPoint(x: (offset + CGFloat(0)) * stepX, y: size.height))
+            for (i, p) in points.enumerated() {
+                path.addLine(to: CGPoint(x: (offset + CGFloat(i)) * stepX, y: y(p.shortTerm)))
             }
-            if !current.isEmpty { segments.append(current) }
-
-            for segment in segments {
-                guard segment.count > 1 else { continue }
-                var path = Path()
-                for (j, pt) in segment.enumerated() {
-                    let x = (offset + CGFloat(pt.0)) * stepX
-                    let y = yPos(pt.1, size: size)
-                    if j == 0 {
-                        path.move(to: CGPoint(x: x, y: size.height))
-                        path.addLine(to: CGPoint(x: x, y: y))
-                    } else {
-                        path.addLine(to: CGPoint(x: x, y: y))
-                    }
-                }
-                let lastX = (offset + CGFloat(segment.last!.0)) * stepX
-                path.addLine(to: CGPoint(x: lastX, y: size.height))
-                path.closeSubpath()
-                context.fill(path, with: .color(color.opacity(0.16)))
-            }
+            path.addLine(to: CGPoint(x: (offset + CGFloat(points.count - 1)) * stepX, y: size.height))
+            path.closeSubpath()
+            context.fill(path, with: .color(color.opacity(0.16)))
         }
 
-        // Линия: разрывается на дырах (−∞), не соединяет через них.
         var line = Path()
-        var started = false
-        var lastIdx = -10
         for (i, p) in points.enumerated() {
-            guard p.momentary.isFinite else {
-                started = false
-                continue
-            }
-            let x = (offset + CGFloat(i)) * stepX
-            let y = yPos(p.momentary, size: size)
-            if !started || i > lastIdx + 1 {
-                line.move(to: CGPoint(x: x, y: y))
-                started = true
+            let pt = CGPoint(x: (offset + CGFloat(i)) * stepX, y: y(p.momentary))
+            if i == 0 {
+                line.move(to: pt)
             } else {
-                line.addLine(to: CGPoint(x: x, y: y))
+                line.addLine(to: pt)
             }
-            lastIdx = i
         }
-        if started {
-            context.stroke(line, with: .color(color), style: StrokeStyle(lineWidth: lineWidth, lineJoin: .round))
-        }
+        context.stroke(line, with: .color(color), style: StrokeStyle(lineWidth: lineWidth, lineJoin: .round))
     }
 
     private func yPos(_ lu: Float, size: CGSize) -> CGFloat {

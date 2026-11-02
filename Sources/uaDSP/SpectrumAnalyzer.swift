@@ -185,25 +185,43 @@ public final class RTASpectrumAnalyzer {
         bandEnergy = [Float](repeating: 1e-12, count: oct.ranges.count)
         bandPeak = [Float](repeating: -120, count: oct.ranges.count)
         bandPeakTicks = [Float](repeating: 0, count: oct.ranges.count)
+        // Частотно-зависимое сглаживание: ниже 200 Гц медленнее (REW-стиль) —
+        // убирает «дыхание» низа от оконных артефактов FFT.
+        bandAlphaMul = oct.centers.map { Self.alphaMultiplier(centerHz: $0) }
 
         if settings.showFineCurve {
-            let fine = buildGrid(24)
+            let fine = buildGrid(Self.finePointsPerOctave)
             fineCenterHz = fine.centers
             fineRange = fine.ranges
             fineEnergy = [Float](repeating: 1e-12, count: fine.ranges.count)
             finePeak = [Float](repeating: -120, count: fine.ranges.count)
+            fineAlphaMul = fine.centers.map { Self.alphaMultiplier(centerHz: $0) }
         } else {
             fineCenterHz = []
             fineRange = []
             fineEnergy = []
             finePeak = []
+            fineAlphaMul = []
         }
         publishBands()
     }
 
+    /// Разрешение тонкой кривой (полос на октаву).
+    nonisolated(unsafe) public static var finePointsPerOctave: Float = 12
+
+    /// Множитель скорости сглаживания для полосы: < 200 Гц — медленнее.
+    private static func alphaMultiplier(centerHz: Float) -> Float {
+        if centerHz < 60 { return 0.15 }        // очень медленно
+        if centerHz < 200 { return 0.35 }        // медленно
+        return 1.0
+    }
+
+    private var bandAlphaMul: [Float] = []
+    private var fineAlphaMul: [Float] = []
+
     private func integrate(_ power: [Float]) {
-        let attack = max(0.001, settings.attack)
-        let release = min(1.0, max(0.001, settings.release))
+        let attackBase = max(0.001, settings.attack)
+        let releaseBase = min(1.0, max(0.001, settings.release))
         let peakTicks = settings.peakHoldSeconds * 60
 
         // Октавные полосы: интеграл энергии (сумма, не среднее).
@@ -212,7 +230,11 @@ public final class RTASpectrumAnalyzer {
             guard range.upperBound <= power.count else { continue }
             var sum: Float = 0
             for b in range { sum += power[b] }
-            let alpha = sum > bandEnergy[i] ? attack : release
+            // Частотно-зависимый множитель: низ сглаживается медленнее.
+            let mul = i < bandAlphaMul.count ? bandAlphaMul[i] : 1
+            let alpha = sum > bandEnergy[i]
+                ? min(1, attackBase * max(1, mul == 1 ? 1 : 1 / mul))
+                : min(1, releaseBase * mul)
             bandEnergy[i] += alpha * (sum - bandEnergy[i])
             let db = dBFromEnergy(bandEnergy[i])
             if db > bandPeak[i] {
@@ -233,7 +255,10 @@ public final class RTASpectrumAnalyzer {
             guard range.upperBound <= power.count else { continue }
             var sum: Float = 0
             for b in range { sum += power[b] }
-            let alpha = sum > fineEnergy[i] ? attack : release
+            let mul = i < fineAlphaMul.count ? fineAlphaMul[i] : 1
+            let alpha = sum > fineEnergy[i]
+                ? min(1, attackBase * max(1, mul == 1 ? 1 : 1 / mul))
+                : min(1, releaseBase * mul)
             fineEnergy[i] += alpha * (sum - fineEnergy[i])
         }
 

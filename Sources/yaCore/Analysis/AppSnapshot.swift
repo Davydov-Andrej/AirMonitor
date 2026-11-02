@@ -40,6 +40,11 @@ public struct MonitorBusConfig: Sendable, Identifiable, Codable {
     /// Доля ширины спектра в нижнем ряду (0.25...0.75). Настройка сетки.
     public var spectrumWidthFraction: Double
 
+    enum CodingKeys: String, CodingKey {
+        case id, name, deviceUID, mode, sampleRate, fftLength, windowType
+        case spectrumWidthFraction
+    }
+
     public init(
         id: BusID = BusID(),
         name: String,
@@ -58,6 +63,19 @@ public struct MonitorBusConfig: Sendable, Identifiable, Codable {
         self.fftLength = fftLength
         self.windowType = windowType
         self.spectrumWidthFraction = spectrumWidthFraction
+    }
+
+    /// Декод с дефолтом для полей, добавленных позже (обратная совместимость сцен).
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decodeIfPresent(BusID.self, forKey: .id) ?? BusID()
+        self.name = try c.decode(String.self, forKey: .name)
+        self.deviceUID = try c.decode(String.self, forKey: .deviceUID)
+        self.mode = try c.decode(BusMode.self, forKey: .mode)
+        self.sampleRate = try c.decodeIfPresent(Double.self, forKey: .sampleRate) ?? 48000
+        self.fftLength = try c.decodeIfPresent(Int.self, forKey: .fftLength) ?? 8192
+        self.windowType = try c.decodeIfPresent(FFT.WindowType.self, forKey: .windowType) ?? .hann
+        self.spectrumWidthFraction = try c.decodeIfPresent(Double.self, forKey: .spectrumWidthFraction) ?? 0.5
     }
 
     public func changingName(_ newName: String) -> MonitorBusConfig {

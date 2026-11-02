@@ -99,30 +99,32 @@ struct SpectrumBusCardContainer: View {
     @ObservedObject var holder: BusSnapshotHolder
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(bus.config.name)
-                    .font(.headline)
-                if !bus.isConnected {
-                    Label("устройство отключено", systemImage: "cable.connector.slash")
-                        .font(.caption2)
-                        .foregroundStyle(.red)
+        TimelineView(.periodic(from: .now, by: 0.05)) { _ in
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(bus.config.name)
+                        .font(.headline)
+                    if !bus.isConnected {
+                        Label("устройство отключено", systemImage: "cable.connector.slash")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    }
+                    Spacer()
                 }
-                Spacer()
-            }
-            if let snapshot = holder.snapshot {
-                ForEach(snapshot.displayChannels) { channel in
-                    SpectrumCurveChart(fine: channel.fineCurve, bands: channel.rtaBands)
-                        .frame(height: 200)
+                if let snapshot = holder.snapshot {
+                    ForEach(snapshot.displayChannels) { channel in
+                        SpectrumCurveChart(fine: channel.fineCurve, bands: channel.rtaBands)
+                            .frame(height: 200)
+                    }
+                } else {
+                    Text("ожидает «Старт»")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, minHeight: 60)
                 }
-            } else {
-                Text("ожидает «Старт»")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .frame(maxWidth: .infinity, minHeight: 60)
             }
+            .padding()
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
         }
-        .padding()
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
     }
 }

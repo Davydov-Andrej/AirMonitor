@@ -48,17 +48,19 @@ struct MonitorBusRowContainer: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        MonitorBusRow(
-            busName: bus.config.name,
-            busMode: bus.config.mode,
-            snapshot: holder.snapshot,
-            isConnected: bus.isConnected,
-            showHints: model.showMetricHints,
-            onMoveUp: onMoveUp,
-            onMoveDown: onMoveDown,
-            canMoveUp: canMoveUp,
-            canMoveDown: canMoveDown
-        )
+        TimelineView(.periodic(from: .now, by: 0.05)) { _ in
+            MonitorBusRow(
+                busName: bus.config.name,
+                busMode: bus.config.mode,
+                snapshot: holder.snapshot,
+                isConnected: bus.isConnected,
+                showHints: model.showMetricHints,
+                onMoveUp: onMoveUp,
+                onMoveDown: onMoveDown,
+                canMoveUp: canMoveUp,
+                canMoveDown: canMoveDown
+            )
+        }
     }
 }
 
