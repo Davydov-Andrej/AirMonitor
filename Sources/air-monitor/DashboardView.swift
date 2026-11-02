@@ -203,7 +203,7 @@ struct BusDashboardCard: View {
                     .fixedSize()
 
                 // Живая секция: перерисовка по таймеру, статика рядом не дёргается.
-                TimelineView(.periodic(from: .now, by: 0.05)) { _ in
+                TimelineView(.animation(minimumInterval: 0.05, paused: false)) { _ in
                     LoudnessHistoryChart(
                         monoHistory: summaryChannel?.loudnessHistory ?? [],
                         leftHistory: isStereo ? leftChannel?.loudnessHistory ?? [] : [],
@@ -228,7 +228,7 @@ struct BusDashboardCard: View {
                         Text("Спектр")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        TimelineView(.periodic(from: .now, by: 0.05)) { _ in
+                        TimelineView(.animation(minimumInterval: 0.05, paused: false)) { _ in
                             SpectrumCurveChart(
                                 fine: summaryChannel?.fineCurve ?? [],
                                 bands: summaryChannel?.rtaBands ?? []
@@ -253,7 +253,7 @@ struct BusDashboardCard: View {
                         Text("Тональный баланс")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        TimelineView(.periodic(from: .now, by: 0.05)) { _ in
+                        TimelineView(.animation(minimumInterval: 0.05, paused: false)) { _ in
                             TonalBalanceChart(
                                 balances: summaryChannel?.tonalBalances ?? [],
                                 hasSignal: summaryChannel?.tonalBalances.isEmpty == false
@@ -310,31 +310,42 @@ struct BusDashboardCard: View {
     /// Метры: моно — один столбик; стерео — два смежных (L/R) в одной рамке.
     @ViewBuilder
     private var meterBlock: some View {
-        if isStereo {
-            HStack(alignment: .top, spacing: 10) {
-                StereoMeterPair(
-                    left: leftChannel,
-                    right: rightChannel
-                )
-                MetricsColumn(
-                    title: "Стерео",
-                    snapshot: summaryChannel,
-                    showHints: model.showMetricHints,
-                    extraMetrics: [
-                        ("Crest", "динамика", summaryChannel?.crestFactorDB),
-                        ("Корр.", "L/R", snapshot?.correlation),
-                    ]
-                )
-            }
-        } else {
-            HStack(alignment: .top, spacing: 10) {
-                SingleMeter(snapshot: summaryChannel)
-                MetricsColumn(
-                    title: summaryChannel.map { String($0.label.suffix(2)).trimmingCharacters(in: .whitespaces) } ?? "",
-                    snapshot: summaryChannel,
-                    showHints: model.showMetricHints,
-                    extraMetrics: [("Crest", "динамика", summaryChannel?.crestFactorDB)]
-                )
+        // Метры/метрики — живые данные: обновляются по своему таймеру
+        // (после переноса TimelineView внутрь карточек статика не дёргается,
+        // но и живая часть требует собственной обёртки).
+        TimelineView(.animation(minimumInterval: 0.05, paused: false)) { _ in
+            meterContent
+        }
+    }
+
+    private var meterContent: some View {
+        Group {
+            if isStereo {
+                HStack(alignment: .top, spacing: 10) {
+                    StereoMeterPair(
+                        left: leftChannel,
+                        right: rightChannel
+                    )
+                    MetricsColumn(
+                        title: "Стерео",
+                        snapshot: summaryChannel,
+                        showHints: model.showMetricHints,
+                        extraMetrics: [
+                            ("Crest", "динамика", summaryChannel?.crestFactorDB),
+                            ("Корр.", "L/R", snapshot?.correlation),
+                        ]
+                    )
+                }
+            } else {
+                HStack(alignment: .top, spacing: 10) {
+                    SingleMeter(snapshot: summaryChannel)
+                    MetricsColumn(
+                        title: summaryChannel.map { String($0.label.suffix(2)).trimmingCharacters(in: .whitespaces) } ?? "",
+                        snapshot: summaryChannel,
+                        showHints: model.showMetricHints,
+                        extraMetrics: [("Crest", "динамика", summaryChannel?.crestFactorDB)]
+                    )
+                }
             }
         }
     }
@@ -560,23 +571,34 @@ struct MetricsColumn: View {
         }
     }
 
+    /// Словарь подсказок по имени метрики — покрывает и extraMetrics.
+    private static let tooltips: [String: String] = [
+        "Crest": "Crest factor (дБ) — разница между пиковым и средним уровнем. Большой = динамичный сигнал (удары, речь с паузами), малый = сжатый/постоянный сигнал.",
+        "Корр.": "Корреляция L/R (−1…+1). +1 — моно-совместимый сигнал (в колонках одинаково), 0 — широкий стерео, −1 — противофаза (уходит из моно, опасно для клубных систем).",
+        "Peak": "Peak (dBFS) — максимальная амплитуда сэмпла за всё время мониторинга. 0 dBFS — потолок шкалы, выше — клиппинг.",
+        "RMS": "RMS (dBFS) — среднеквадратичный уровень с интеграцией ~100 мс. Это заливка столбика: реальная громкость без мгновенных пиков.",
+        "TruePk": "True Peak (dBTP) — пик с учётом колебаний МЕЖДУ сэмплами (восстановит ЦАП). Может быть выше Peak. Для эфира нормируют ниже −1 dBTP.",
+        "I": "Integrated loudness (LUFS) — итоговая громкость с начала захвата с гейтингом. Норматив эфира EBU R128: −23 LUFS.",
+        "LRA": "Loudness Range (LU) — разброс громкости (10–95 перцентили). Малый = ровный эфир, большой = резкие перепады.",
+    ]
+
     @ViewBuilder
     private func metricRow(_ name: String, _ hint: String, _ value: Float?, tooltip: String? = nil) -> some View {
         HStack(spacing: 4) {
             Text(showHints ? "\(name) (\(hint))" : name)
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
-                .help(tooltip ?? "")
+                .help(tooltip ?? Self.tooltips[name] ?? "")
             Spacer()
             if let value, value.isFinite {
                 Text(String(format: "%.1f", value))
                     .font(.system(size: 10, design: .monospaced).weight(.medium))
-                    .help(tooltip ?? "")
+                    .help(tooltip ?? Self.tooltips[name] ?? "")
             } else {
                 Text("--")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.tertiary)
-                    .help(tooltip ?? "")
+                    .help(tooltip ?? Self.tooltips[name] ?? "")
             }
         }
     }

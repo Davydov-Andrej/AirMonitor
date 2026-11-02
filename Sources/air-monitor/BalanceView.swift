@@ -39,7 +39,7 @@ struct BalanceBusCardContainer: View {
     let holder: BusSnapshotHolder
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.05)) { _ in
+        TimelineView(.animation(minimumInterval: 0.05, paused: false)) { _ in
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text(bus.config.name)

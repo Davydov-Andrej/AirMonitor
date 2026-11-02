@@ -143,21 +143,21 @@ struct MonitorBusRow: View {
                 }
             }
 
-            HStack(alignment: .top, spacing: 14) {
-                if isStereo {
-                    StereoMeterPair(
-                        left: snapshot?.channels.first,
-                        right: snapshot?.channels.dropFirst().first
+            TimelineView(.animation(minimumInterval: 0.05, paused: false)) { _ in
+                HStack(alignment: .top, spacing: 14) {
+                    if isStereo {
+                        StereoMeterPair(
+                            left: snapshot?.channels.first,
+                            right: snapshot?.channels.dropFirst().first
+                        )
+                    } else {
+                        SingleMeter(snapshot: summary)
+                    }
+                    MetricsColumn(
+                        title: "",
+                        snapshot: summary,
+                        showHints: showHints
                     )
-                } else {
-                    SingleMeter(snapshot: summary)
-                }
-                MetricsColumn(
-                    title: "",
-                    snapshot: summary,
-                    showHints: showHints
-                )
-                TimelineView(.periodic(from: .now, by: 0.05)) { _ in
                     LoudnessHistoryChart(
                         monoHistory: summary?.loudnessHistory ?? [],
                         leftHistory: isStereo ? snapshot?.channels.first?.loudnessHistory ?? [] : [],
