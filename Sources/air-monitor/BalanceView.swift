@@ -59,10 +59,7 @@ struct BalanceBusCardContainer: View {
 
                 if let snapshot = holder.snapshot {
                     let summary = snapshot.mono ?? snapshot.channels.first
-                    TonalBalanceChart(
-                        balances: summary?.tonalBalances ?? [],
-                        hasSignal: summary?.tonalBalances.isEmpty == false
-                    )
+                    TonalBalanceChart(holder: holder)
                     .frame(height: 180)
                 } else {
                     Text("ожидает «Старт»")

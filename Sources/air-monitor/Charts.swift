@@ -8,231 +8,33 @@ extension InstrumentBalance: Identifiable {
 /// Бегущий график громкости: окно последних N секунд. Режимы:
 /// моно (M/S-заливка+линия), стерео (3 линии: стерео, L, R).
 struct LoudnessHistoryChart: View {
-    var monoHistory: [LoudnessMeter.HistoryPoint] = []
-    var leftHistory: [LoudnessMeter.HistoryPoint] = []
-    var rightHistory: [LoudnessMeter.HistoryPoint] = []
-    var target: Float = -23
-    /// Окно отображения в секундах (история идёт 10 Гц).
-    var windowSeconds: Double = 15
-
-    private let minLU: Float = -40
-    private let maxLU: Float = 0
-    private let stepHz: Double = 10
+    let holder: BusSnapshotHolder
+    var isStereo: Bool = false
 
     var body: some View {
-        Canvas { context, size in
-            drawGrid(context: context, size: size)
-
-            let capacity = Int(windowSeconds * stepHz)
-            let stepX = size.width / CGFloat(max(capacity - 1, 1))
-
-            // Стерео-режим: заливка по суммарному сигналу + 3 линии.
-            if !leftHistory.isEmpty || !rightHistory.isEmpty {
-                drawSeries(context: context, size: size, points: monoHistory, capacity: capacity,
-                           color: .blue, fill: true, lineWidth: 2)
-                drawSeries(context: context, size: size, points: leftHistory, capacity: capacity,
-                           color: .red, fill: false)
-                drawSeries(context: context, size: size, points: rightHistory, capacity: capacity,
-                            color: .blue, fill: false)
-            } else {
-                drawSeries(context: context, size: size, points: monoHistory, capacity: capacity,
-                           color: .blue, fill: true)
-            }
-        }
-        .overlay(alignment: .topLeading) {
-            // Статичные подписи LU (рисуются один раз, не в каждом кадре).
-            let luLabels: [Int] = [-10, -20, -30]
-            GeometryReader { geo in
-                ZStack(alignment: .topLeading) {
-                    ForEach(luLabels, id: \.self) { lu in
-                        Text("\(lu)")
-                            .font(.system(size: 8))
-                            .foregroundStyle(.secondary)
-                            .offset(x: 3, y: yPos(Float(lu), size: geo.size) + 1)
-                    }
-                }
-            }
-            .allowsHitTesting(false)
+        LiveCanvas { [holder, isStereo] in
+            CGChart.loudnessDrawer(
+                holder: holder,
+                isStereo: isStereo
+            )
         }
         .background(Color.black.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
-
-    private func drawGrid(context: GraphicsContext, size: CGSize) {
-        // Только линии; подписи LU — в статичном оверлее (Text в Canvas дорог).
-        for lu in stride(from: minLU + 10, to: maxLU, by: 10) {
-            let y = yPos(lu, size: size)
-            var grid = Path()
-            grid.move(to: CGPoint(x: 0, y: y))
-            grid.addLine(to: CGPoint(x: size.width, y: y))
-            context.stroke(grid, with: .color(.gray.opacity(0.15)), lineWidth: 0.5)
-        }
-        let targetY = yPos(target, size: size)
-        var targetPath = Path()
-        targetPath.move(to: CGPoint(x: 0, y: targetY))
-        targetPath.addLine(to: CGPoint(x: size.width, y: targetY))
-        context.stroke(targetPath, with: .color(.green.opacity(0.45)), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-    }
-
-    private func drawSeries(
-        context: GraphicsContext, size: CGSize,
-        points: [LoudnessMeter.HistoryPoint], capacity: Int,
-        color: Color, fill: Bool, lineWidth: CGFloat = 1.2
-    ) {
-        guard !points.isEmpty else { return }
-        let stepX = size.width / CGFloat(max(capacity - 1, 1))
-        let offset = CGFloat(capacity - points.count)
-
-        // Тишина (−∞) зажимается в низ шкалы — ровная «полка» вместо дыр.
-        func y(_ lu: Float) -> CGFloat {
-            let floorLU = minLU + 1  // чуть выше оси, чтобы полка была видна
-            let clamped = lu.isFinite ? max(minLU, min(maxLU, lu)) : floorLU
-            return size.height * (1 - CGFloat((clamped - minLU) / (maxLU - minLU)))
-        }
-
-        if fill {
-            var path = Path()
-            path.move(to: CGPoint(x: (offset + CGFloat(0)) * stepX, y: size.height))
-            for (i, p) in points.enumerated() {
-                path.addLine(to: CGPoint(x: (offset + CGFloat(i)) * stepX, y: y(p.shortTerm)))
-            }
-            path.addLine(to: CGPoint(x: (offset + CGFloat(points.count - 1)) * stepX, y: size.height))
-            path.closeSubpath()
-            context.fill(path, with: .color(color.opacity(0.16)))
-        }
-
-        var line = Path()
-        for (i, p) in points.enumerated() {
-            let pt = CGPoint(x: (offset + CGFloat(i)) * stepX, y: y(p.momentary))
-            if i == 0 {
-                line.move(to: pt)
-            } else {
-                line.addLine(to: pt)
-            }
-        }
-        context.stroke(line, with: .color(color), style: StrokeStyle(lineWidth: lineWidth, lineJoin: .round))
-    }
-
-    private func yPos(_ lu: Float, size: CGSize) -> CGFloat {
-        let clamped = max(minLU, min(maxLU, lu))
-        return size.height * (1 - CGFloat((clamped - minLU) / (maxLU - minLU)))
-    }
 }
+
 
 /// Спектр: тонкая кривая + октавные полосы. Подписи осей — статичный слой
 /// поверх Canvas (Text внутри Canvas ресолвится каждый кадр — дорого).
 struct SpectrumCurveChart: View {
-    let fine: [SpectrumPoint]
-    let bands: [RTABand]
-
-    private let minDB: Float = -90
-    private let maxDB: Float = 10
-
-    private static let freqLabels: [(Float, String)] = [
-        (63, "63"), (250, "250"), (1000, "1k"), (4000, "4k"), (16000, "16k")
-    ]
-    private static let dbLabels: [Int] = [10, -2, -14, -26, -38, -50, -62, -74, -86]
+    let holder: BusSnapshotHolder
 
     var body: some View {
-        Canvas { context, size in
-            // Сетка по Y (без текста — текст в оверлее)
-            for db in Self.dbLabels {
-                let y = yPos(Float(db), size: size)
-                var line = Path()
-                line.move(to: CGPoint(x: 0, y: y))
-                line.addLine(to: CGPoint(x: size.width, y: y))
-                context.stroke(line, with: .color(.gray.opacity(0.15)), lineWidth: 0.5)
-            }
-
-            // Тики частот (без текста)
-            for (freq, _) in Self.freqLabels {
-                let fx = xPos(freq, width: size.width)
-                var tick = Path()
-                tick.move(to: CGPoint(x: fx, y: 0))
-                tick.addLine(to: CGPoint(x: fx, y: size.height))
-                context.stroke(tick, with: .color(.gray.opacity(0.12)), lineWidth: 0.5)
-            }
-
-            // Октавные полосы (ленты позади кривой)
-            if !bands.isEmpty {
-                let slot = size.width / CGFloat(bands.count)
-                for band in bands {
-                    let x = CGFloat(band.id) * slot
-                    let h = barHeight(band.levelDB, size: size)
-                    var rect = Path(CGRect(x: x + 1, y: size.height - h, width: slot - 2, height: h))
-                    context.fill(rect, with: .color(.accentColor.opacity(0.18)))
-                    // пик-холд
-                    if band.peakDB > minDB {
-                        let ph = barHeight(band.peakDB, size: size)
-                        var peak = Path(CGRect(x: x + 1, y: size.height - ph, width: slot - 2, height: 1.5))
-                        context.fill(peak, with: .color(.primary.opacity(0.4)))
-                    }
-                }
-            }
-
-            // Тонкая кривая поверх
-            if fine.count > 1 {
-                var path = Path()
-                for (i, point) in fine.enumerated() {
-                    let x = xPos(point.frequency, width: size.width)
-                    let y = yPos(point.magnitudeDB, size: size)
-                    if i == 0 {
-                        path.move(to: CGPoint(x: x, y: y))
-                    } else {
-                        path.addLine(to: CGPoint(x: x, y: y))
-                    }
-                }
-                context.stroke(path, with: .color(.accentColor), style: StrokeStyle(lineWidth: 1.6, lineJoin: .round))
-            }
-        }
-        .overlay {
-            // Статичные подписи осей: рисуются один раз, не пересоздаются в кадрах.
-            GeometryReader { geo in
-                let w = geo.size.width
-                let h = geo.size.height
-                ZStack(alignment: .topLeading) {
-                    ForEach(Self.dbLabels, id: \.self) { db in
-                        Text("\(db)")
-                            .font(.system(size: 8))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                            .offset(
-                                x: 4,
-                                y: yPos(Float(db), size: CGSize(width: w, height: h)) + 1
-                            )
-                    }
-                    ForEach(Self.freqLabels, id: \.1) { freq, label in
-                        Text(label)
-                            .font(.system(size: 8))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                            .offset(
-                                x: xPos(freq, width: w) + 3,
-                                y: h - 14
-                            )
-                    }
-                }
-                .allowsHitTesting(false)
-            }
+        LiveCanvas { [holder] in
+            CGChart.spectrumDrawer(holder: holder)
         }
         .background(Color.black.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 6))
-    }
-
-    private func xPos(_ freq: Float, width: CGFloat) -> CGFloat {
-        let logMin = log10f(20)
-        let logMax = log10f(20000)
-        let t = (log10f(max(freq, 20)) - logMin) / (logMax - logMin)
-        return CGFloat(max(0, min(1, t))) * width
-    }
-
-    private func yPos(_ db: Float, size: CGSize) -> CGFloat {
-        let t = (db - minDB) / (maxDB - minDB)
-        return size.height * (1 - CGFloat(max(0, min(1, t))))
-    }
-
-    private func barHeight(_ db: Float, size: CGSize) -> CGFloat {
-        yPos(db, size: size)
     }
 }
 
@@ -240,88 +42,17 @@ struct SpectrumCurveChart: View {
 /// кривая текущего баланса поверх целевой зоны референса.
 /// Балансы считаются в DSP-потоке (ChannelAnalyzerSet) — UI только рисует.
 struct TonalBalanceChart: View {
-    private let spanDB: Float = 40  // окно отображения ±20 дБ вокруг среднего
-
-    /// Готовые балансы (приходят в снапшоте).
-    var balances: [InstrumentBalance] = []
-    var hasSignal: Bool = true
+    let holder: BusSnapshotHolder
 
     var body: some View {
-        let balances = self.balances
-        let hasSignal = self.hasSignal
-
-        Canvas { context, size in
-            guard !balances.isEmpty, hasSignal else {
-                let text = Text("нет сигнала").font(.system(size: 9)).foregroundStyle(.tertiary)
-                context.draw(text, at: CGPoint(x: size.width / 2, y: size.height / 2))
-                return
-            }
-
-            // Среднее отклонение — центр графика.
-            let deviations = balances.map { $0.deviationDB }
-            let mean = deviations.reduce(0, +) / Float(deviations.count)
-
-            // Целевая зона (референс = 0, допуски ±4 дБ).
-            let zeroY = yPos(mean, size: size)
-            let upperY = yPos(mean - 4, size: size)
-            let lowerY = yPos(mean + 4, size: size)
-
-            // Зона допуска
-            var zone = Path(CGRect(x: 0, y: upperY, width: size.width, height: lowerY - upperY))
-            context.fill(zone, with: .color(.green.opacity(0.12)))
-
-            // Линия референса
-            var refLine = Path()
-            refLine.move(to: CGPoint(x: 0, y: zeroY))
-            refLine.addLine(to: CGPoint(x: size.width, y: zeroY))
-            context.stroke(refLine, with: .color(.green.opacity(0.5)), lineWidth: 1)
-
-            // Кривая баланса
-            let slot = size.width / CGFloat(max(balances.count, 1))
-            var path = Path()
-            for (i, balance) in balances.enumerated() {
-                let x = CGFloat(i) * slot + slot / 2
-                let y = yPos(balance.deviationDB, size: size)
-                if i == 0 {
-                    path.move(to: CGPoint(x: x, y: y))
-                } else {
-                    path.addLine(to: CGPoint(x: x, y: y))
-                }
-            }
-            context.stroke(path, with: .color(.accentColor), style: StrokeStyle(lineWidth: 2, lineJoin: .round))
-
-            // Точки выхода за допуск — красным.
-            for (i, balance) in balances.enumerated() where abs(balance.deviationDB) > 4 {
-                let x = CGFloat(i) * slot + slot / 2
-                let y = yPos(balance.deviationDB, size: size)
-                let rect = CGRect(x: x - 3, y: y - 3, width: 6, height: 6)
-                context.fill(Path(ellipseIn: rect), with: .color(balance.deviationDB > 0 ? .red : .orange))
-            }
-        }
-        .overlay(alignment: .bottom) {
-            // Подписи полос — статичный слой (Text в Canvas дорог).
-            GeometryReader { geo in
-                let slot = geo.size.width / CGFloat(max(balances.count, 1))
-                HStack(spacing: 0) {
-                    ForEach(Array(balances.enumerated()), id: \.element.band.rawName) { _, balance in
-                        Text(balance.band.rawName)
-                            .font(.system(size: 7))
-                            .foregroundStyle(.secondary)
-                            .frame(width: slot)
-                    }
-                }
-                .allowsHitTesting(false)
-            }
+        LiveCanvas { [holder] in
+            CGChart.balanceDrawer(holder: holder)
         }
         .background(Color.black.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
-
-    private func yPos(_ db: Float, size: CGSize) -> CGFloat {
-        let t = (db + spanDB / 2) / spanDB
-        return size.height * (1 - CGFloat(max(0, min(1, t)))) * 0.92 + size.height * 0.04
-    }
 }
+
 
 /// Баланс инструментальных полос (компактно) с отклонениями от референса.
 struct InstrumentBalanceStrip: View {

@@ -158,13 +158,7 @@ struct MonitorBusRow: View {
                         snapshot: summary,
                         showHints: showHints
                     )
-                    LoudnessHistoryChart(
-                        monoHistory: summary?.loudnessHistory ?? [],
-                        leftHistory: isStereo ? snapshot?.channels.first?.loudnessHistory ?? [] : [],
-                        rightHistory: isStereo ? snapshot?.channels.dropFirst().first?.loudnessHistory ?? [] : [],
-                        target: -23,
-                        windowSeconds: 15
-                    )
+                    LoudnessHistoryChart(holder: holder, isStereo: isStereo)
                     .frame(maxWidth: .infinity)
                     .frame(height: meterHeight)
                 }

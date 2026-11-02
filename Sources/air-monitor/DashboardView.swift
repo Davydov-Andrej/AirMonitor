@@ -203,18 +203,9 @@ struct BusDashboardCard: View {
                     .fixedSize()
 
                 // Живая секция: перерисовка по таймеру, статика рядом не дёргается.
-                TimelineView(.animation(minimumInterval: 0.05, paused: false)) { _ in
-                    LoudnessHistoryChart(
-                        monoHistory: summaryChannel?.loudnessHistory ?? [],
-                        leftHistory: isStereo ? leftChannel?.loudnessHistory ?? [] : [],
-                        rightHistory: isStereo ? rightChannel?.loudnessHistory ?? [] : [],
-                        target: -23,
-                        windowSeconds: 15
-                    )
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 150)
-                    .id("loudness")
-                }
+                LoudnessHistoryChart(holder: holder, isStereo: isStereo)
+                .frame(maxWidth: .infinity)
+                .frame(height: 150)
             }
 
             Divider()
@@ -228,13 +219,8 @@ struct BusDashboardCard: View {
                         Text("Спектр")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        TimelineView(.animation(minimumInterval: 0.05, paused: false)) { _ in
-                            SpectrumCurveChart(
-                                fine: summaryChannel?.fineCurve ?? [],
-                                bands: summaryChannel?.rtaBands ?? []
-                            )
-                            .frame(height: 130)
-                        }
+                        SpectrumCurveChart(holder: holder)
+                        .frame(height: 130)
                     }
                     .frame(width: dragWidth, alignment: .leading)
 
@@ -253,13 +239,8 @@ struct BusDashboardCard: View {
                         Text("Тональный баланс")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        TimelineView(.animation(minimumInterval: 0.05, paused: false)) { _ in
-                            TonalBalanceChart(
-                                balances: summaryChannel?.tonalBalances ?? [],
-                                hasSignal: summaryChannel?.tonalBalances.isEmpty == false
-                            )
-                            .frame(height: 130)
-                        }
+                        TonalBalanceChart(holder: holder)
+                        .frame(height: 130)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, 8)

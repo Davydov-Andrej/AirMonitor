@@ -139,11 +139,9 @@ struct SpectrumBusCardContainer: View {
                     }
                     Spacer()
                 }
-                if let snapshot = holder.snapshot {
-                    ForEach(snapshot.displayChannels) { channel in
-                        SpectrumCurveChart(fine: channel.fineCurve, bands: channel.rtaBands)
-                            .frame(height: 200)
-                    }
+                if holder.snapshot != nil {
+                    SpectrumCurveChart(holder: holder)
+                        .frame(height: 200)
                 } else {
                     Text("ожидает «Старт»")
                         .font(.caption)
