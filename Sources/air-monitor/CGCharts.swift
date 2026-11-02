@@ -128,7 +128,7 @@ enum CGChart {
                 let x = (offset + CGFloat(i)) * stepX
                 let y = yPos(keyPath(p), height: height)
                 if closeToBottom && !started {
-                    path.move(to: CGPoint(x: x, y: 0))
+                    path.move(to: CGPoint(x: x, y: height))
                     path.addLine(to: CGPoint(x: x, y: y))
                     started = true
                 } else if !started {
@@ -139,7 +139,7 @@ enum CGChart {
                 }
             }
             if closeToBottom, let last = points.last {
-                path.addLine(to: CGPoint(x: (offset + CGFloat(points.count - 1)) * stepX, y: 0))
+                path.addLine(to: CGPoint(x: (offset + CGFloat(points.count - 1)) * stepX, y: height))
                 path.closeSubpath()
             }
             return path

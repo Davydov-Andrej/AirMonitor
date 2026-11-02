@@ -47,30 +47,37 @@ final class LiveCanvasNSView: NSView {
         }
     }
 
-    /// Вызывается с display-link потока — только пометка перерисовки
-    /// (draw происходит на main через needsDisplay).
+    /// Вызывается с display-link потока: рендерим в offscreen bitmap и
+    /// выставляем layer.contents. Полностью асинхронно — event-loop и активность
+    /// окна не влияют на частоту обновления графика.
     func frameTick() {
         stateLock.lock()
         let shouldDraw = window != nil && !isHiddenOrHasHiddenAncestor
         stateLock.unlock()
-        if shouldDraw {
+        guard shouldDraw, let drawer else { return }
+
+        let scale = window?.backingScaleFactor ?? 2
+        let w = max(1, Int(bounds.width * scale))
+        let h = max(1, Int(bounds.height * scale))
+        guard let ctx = CGContext(
+            data: nil, width: w, height: h,
+            bitsPerComponent: 8, bytesPerRow: w * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return }
+
+        // CGContext битмапа: Y снизу-вверх, как в AppKit. Флип для совместимости.
+        ctx.translateBy(x: 0, y: CGFloat(h))
+        ctx.scaleBy(x: scale, y: -scale)
+
+        drawer(ctx, bounds.size)
+
+        if let image = ctx.makeImage() {
             DispatchQueue.main.async { [weak self] in
-                self?.needsDisplay = true
+                self?.layer?.contents = image
+                self?.layer?.contentsGravity = .resize
             }
         }
-    }
-
-    nonisolated(unsafe) static var drawCount = 0
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        ctx.saveGState()
-        // AppKit-координаты: начало снизу-слева. Логика графиков написана для
-        // SwiftUI (сверху-слева) — флипаем, чтобы не переписывать yPos-функции.
-        ctx.translateBy(x: 0, y: bounds.height)
-        ctx.scaleBy(x: 1, y: -1)
-        drawer?(ctx, bounds.size)
-        ctx.restoreGState()
     }
 
     deinit {
