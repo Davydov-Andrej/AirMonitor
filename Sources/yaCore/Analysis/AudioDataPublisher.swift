@@ -19,6 +19,8 @@ public struct ChannelSnapshot: Identifiable, Sendable {
     public let rtaBands: [RTABand]
     public let fineCurve: [SpectrumPoint]
     public let loudnessHistory: [LoudnessMeter.HistoryPoint]
+    /// Готовый тональный баланс (посчитан в DSP-потоке, UI только рисует).
+    public let tonalBalances: [InstrumentBalance]
 
     public init(
         id: Int,
@@ -34,6 +36,7 @@ public struct ChannelSnapshot: Identifiable, Sendable {
         rtaBands: [RTABand] = [],
         fineCurve: [SpectrumPoint] = [],
         loudnessHistory: [LoudnessMeter.HistoryPoint] = [],
+        tonalBalances: [InstrumentBalance] = [],
         integratedLUFS: Float = -Float.infinity,
         loudnessRangeLU: Float = 0
     ) {
@@ -50,6 +53,7 @@ public struct ChannelSnapshot: Identifiable, Sendable {
         self.rtaBands = rtaBands
         self.fineCurve = fineCurve
         self.loudnessHistory = loudnessHistory
+        self.tonalBalances = tonalBalances
         self.integratedLUFS = integratedLUFS
         self.loudnessRangeLU = loudnessRangeLU
     }

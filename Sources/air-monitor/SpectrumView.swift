@@ -49,17 +49,6 @@ struct SpectrumView: View {
                         }
                     }
                 }
-                Divider()
-                // Окно усреднения метрики S (short-term громкости).
-                Picker("Окно S", selection: Binding(
-                    get: { model.rtaSettings.shortTermSeconds },
-                    set: { model.rtaSettings.shortTermSeconds = $0 }
-                )) {
-                    Text("S: 0.4 с").tag(0.4)
-                    Text("S: 1 с (по умолчанию)").tag(1.0)
-                    Text("S: 3 с (стандарт EBU)").tag(3.0)
-                }
-                .pickerStyle(.inline)
             } label: {
                 Label(presetName, systemImage: "gauge.with.needle")
             }
@@ -84,27 +73,37 @@ struct SpectrumView: View {
                 ))
 
                 Toggle("Тонкая кривая (детальные пики EQ)", isOn: $model.rtaSettings.showFineCurve)
+            } label: {
+                Label("Полосы: 1/\(model.rtaSettings.bandsPerOctave) окт", systemImage: "slider.horizontal.3")
+            }
 
-                Divider()
-
-                // Скорость спада: как быстро график опускается после пика.
-                // Быстрый спад = видны сигналы ниже, скрытые громким пиком.
+            // Скорость спада: как быстро кривая опускается после пика.
+            // Числа — доля нового значения за шаг (release-коэффициент EMA).
+            Menu {
                 Picker("Спад", selection: Binding(
                     get: { model.rtaSettings.release },
                     set: { model.rtaSettings.release = $0 }
                 )) {
-                    Text("Мгновенный").tag(Float(0.6))
-                    Text("Быстрый").tag(Float(0.25))
-                    Text("Средний (по умолчанию)").tag(Float(0.08))
-                    Text("Медленный").tag(Float(0.03))
-                    Text("Усреднение").tag(Float(0.01))
+                    Text("Мгновенный (0.60)").tag(Float(0.6))
+                    Text("Быстрый (0.25)").tag(Float(0.25))
+                    Text("Средний (0.08)").tag(Float(0.08))
+                    Text("Медленный (0.03)").tag(Float(0.03))
+                    Text("Усреднение (0.01)").tag(Float(0.01))
                 }
                 .pickerStyle(.inline)
-
-                Divider()
             } label: {
-                Label("Полосы: 1/\(model.rtaSettings.bandsPerOctave) окт", systemImage: "slider.horizontal.3")
+                Label("Спад: \(releaseName)", systemImage: "arrow.down.right")
             }
+        }
+    }
+
+    private var releaseName: String {
+        switch model.rtaSettings.release {
+        case 0.55...: return "мгновенный"
+        case 0.2..<0.55: return "быстрый"
+        case 0.05..<0.2: return "средний"
+        case 0.02..<0.05: return "медленный"
+        default: return "усреднение"
         }
     }
 

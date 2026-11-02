@@ -244,10 +244,10 @@ public final class RTASpectrumAnalyzer {
             fineEnergy[i] += alpha * (sum - fineEnergy[i])
         }
 
-        bandsDirty = true
+        publishBands()
     }
 
-    private var bandsDirty = true
+    private var bandsDirty = false
 
     private func dBFromEnergy(_ e: Float) -> Float {
         guard e > 1e-14 else { return -120 }

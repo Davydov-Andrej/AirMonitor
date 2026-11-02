@@ -238,29 +238,17 @@ struct SpectrumCurveChart: View {
 
 /// Тональный баланс в стиле iZotope Tonal Balance Control:
 /// кривая текущего баланса поверх целевой зоны референса.
-/// Отображается для сводного канала шины, а не на каждый канал.
+/// Балансы считаются в DSP-потоке (ChannelAnalyzerSet) — UI только рисует.
 struct TonalBalanceChart: View {
-    let spectrum: [SpectrumPoint]
-    let sampleRate: Float
-
     private let spanDB: Float = 40  // окно отображения ±20 дБ вокруг среднего
 
-    // Кэш расчёта: analyzer создаётся только когда спектр реально изменился,
-    // а не на каждый тик TimelineView (20/с).
-    @State private var cachedSpectrum: [SpectrumPoint] = []
-    @State private var cachedBalances: [InstrumentBalance] = []
-    @State private var cachedHasSignal = false
+    /// Готовые балансы (приходят в снапшоте).
+    var balances: [InstrumentBalance] = []
+    var hasSignal: Bool = true
 
     var body: some View {
-        let needRecompute = spectrum != cachedSpectrum
-        let analyzer = needRecompute ? InstrumentBalanceAnalyzer(spectrum: spectrum, sampleRate: sampleRate) : nil
-        let balances = needRecompute ? (analyzer?.balances() ?? []) : cachedBalances
-        let hasSignal = needRecompute ? (analyzer?.hasSignal ?? false) : cachedHasSignal
-        let _ = needRecompute ? DispatchQueue.main.async {
-            cachedSpectrum = spectrum
-            cachedBalances = balances
-            cachedHasSignal = hasSignal
-        } : ()
+        let balances = self.balances
+        let hasSignal = self.hasSignal
 
         Canvas { context, size in
             guard !balances.isEmpty, hasSignal else {

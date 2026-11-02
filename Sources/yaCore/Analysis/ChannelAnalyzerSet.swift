@@ -17,6 +17,7 @@ public final class ChannelAnalyzerSet {
     public private(set) var rtaBands: [RTABand] = []
     public private(set) var rtaFineCurve: [SpectrumPoint] = []
     private var lastSpectrumDirty = false
+    private var lastBalances: [InstrumentBalance] = []
 
     public init(channelIndex: Int, sampleRate: Float, fftLength: Int, windowType: FFT.WindowType = .hann) {
         self.channelIndex = channelIndex
@@ -69,6 +70,9 @@ public final class ChannelAnalyzerSet {
             lastSpectrum = data.bands.map {
                 SpectrumPoint(id: $0.id, frequency: $0.centerFrequency, magnitudeDB: $0.levelDB)
             }
+            // Тональный баланс считается здесь (DSP-поток), а не в UI.
+            let analyzer = InstrumentBalanceAnalyzer(spectrum: lastSpectrum, sampleRate: sampleRate)
+            lastBalances = analyzer.balances()
             lastSpectrumDirty = false
         }
         let reading = loudness.reading()
@@ -84,10 +88,11 @@ public final class ChannelAnalyzerSet {
             crestFactorDB: profile.crestFactorDB,
             momentaryLUFS: reading.momentaryLUFS,
             shortTermLUFS: reading.shortTermLUFS,
-            spectrum: [],  // выводится из rtaBands (дубликат убран)
+            spectrum: [],
             rtaBands: rtaBands,
             fineCurve: rtaFineCurve,
             loudnessHistory: history,
+            tonalBalances: lastBalances,
             integratedLUFS: reading.integratedLUFS,
             loudnessRangeLU: reading.loudnessRangeLU
         )

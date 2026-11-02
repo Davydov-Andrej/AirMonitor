@@ -60,8 +60,8 @@ struct BalanceBusCardContainer: View {
                 if let snapshot = holder.snapshot {
                     let summary = snapshot.mono ?? snapshot.channels.first
                     TonalBalanceChart(
-                        spectrum: summary?.rtaBands.map { SpectrumPoint(id: $0.id, frequency: $0.centerFrequency, magnitudeDB: $0.levelDB) } ?? [],
-                        sampleRate: Float(snapshot.sampleRate)
+                        balances: summary?.tonalBalances ?? [],
+                        hasSignal: summary?.tonalBalances.isEmpty == false
                     )
                     .frame(height: 180)
                 } else {

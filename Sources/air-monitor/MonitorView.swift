@@ -12,6 +12,21 @@ struct MonitorView: View {
                 Text("Уровни и динамика")
                     .font(.title2)
                 Spacer()
+                // Окно усреднения метрики S (short-term громкости).
+                Menu {
+                    Picker("Окно S", selection: Binding(
+                        get: { model.rtaSettings.shortTermSeconds },
+                        set: { model.rtaSettings.shortTermSeconds = $0 }
+                    )) {
+                        Text("S: 0.4 с").tag(0.4)
+                        Text("S: 1 с (по умолчанию)").tag(1.0)
+                        Text("S: 2 с").tag(2.0)
+                        Text("S: 3 с (стандарт EBU)").tag(3.0)
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    Label("Окно S: \(sWindowLabel)", systemImage: "timer")
+                }
             }
             if model.buses.isEmpty {
                 ContentUnavailableView("Нет шин", systemImage: "waveform", description: Text("Добавьте шину на дашборде и запустите захват"))
@@ -34,6 +49,11 @@ struct MonitorView: View {
             }
         }
         .padding()
+    }
+
+    private var sWindowLabel: String {
+        let v = model.rtaSettings.shortTermSeconds
+        return v.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(v)) : String(format: "%.1f", v)
     }
 }
 

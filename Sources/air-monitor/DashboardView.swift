@@ -250,8 +250,8 @@ struct BusDashboardCard: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         TonalBalanceChart(
-                            spectrum: summaryChannel?.rtaBands.map { SpectrumPoint(id: $0.id, frequency: $0.centerFrequency, magnitudeDB: $0.levelDB) } ?? [],
-                            sampleRate: Float(snapshot?.sampleRate ?? 48000)
+                            balances: summaryChannel?.tonalBalances ?? [],
+                            hasSignal: summaryChannel?.tonalBalances.isEmpty == false
                         )
                         .frame(height: 130)
                     }
@@ -506,16 +506,23 @@ struct MetricsColumn: View {
                     .foregroundStyle(.secondary)
             }
             // Громкость — первичные метрики: сверху, крупно, жирно.
-            lufsRow("M", "громк. 400мс", snapshot?.momentaryLUFS)
-            lufsRow("S", "громк. 3с", snapshot?.shortTermLUFS)
+            lufsRow("M", "громкость сейчас", snapshot?.momentaryLUFS,
+                    tooltip: "Momentary loudness (LUFS) — громкость «прямо сейчас» по ITU-R BS.1770: K-взвешенный сигнал за последние 400 мс.")
+            lufsRow("S", "громкость за окно", snapshot?.shortTermLUFS,
+                    tooltip: "Short-term loudness (LUFS) — громкость за окно усреднения (настраивается на вкладке «Монитор»: по умолчанию 1 с, стандарт EBU — 3 с).")
             Divider()
                 .frame(height: 0.5)
                 .padding(.vertical, 1)
-            metricRow("Peak", "пик", snapshot?.peakDB)
-            metricRow("RMS", "среднее", snapshot?.rmsDB)
-            metricRow("TruePk", "ист. пик", snapshot?.truePeakDB)
-            metricRow("I", "громк. эфира", snapshot?.integratedLUFS)
-            metricRow("LRA", "разброс", snapshot?.loudnessRangeLU)
+            metricRow("Peak", "макс. сэмпл", snapshot?.peakDB,
+                      tooltip: "Peak (dBFS) — максимальная амплитуда сэмпла за всё время мониторинга. 0 dBFS — потолок шкалы, выше — клиппинг.")
+            metricRow("RMS", "текущий уровень", snapshot?.rmsDB,
+                      tooltip: "RMS (dBFS) — среднеквадратичный уровень с интеграцией ~100 мс. Это заливка столбика: реальная громкость без мгновенных пиков.")
+            metricRow("TruePk", "межсэмпл. пик", snapshot?.truePeakDB,
+                      tooltip: "True Peak (dBTP) — пик с учётом колебаний МЕЖДУ сэмплами (восстановит ЦАП). Может быть выше Peak. Для эфира нормируют ниже −1 dBTP.")
+            metricRow("I", "громкость эфира", snapshot?.integratedLUFS,
+                      tooltip: "Integrated loudness (LUFS) — итоговая громкость с начала захвата с гейтингом. Норматив эфира EBU R128: −23 LUFS.")
+            metricRow("LRA", "диапазон громк.", snapshot?.loudnessRangeLU,
+                      tooltip: "Loudness Range (LU) — разброс громкости (10–95 перцентили). Малый = ровный эфир, большой = резкие перепады.")
             ForEach(extraMetrics, id: \.0) { m in
                 metricRow(m.0, m.1, m.2)
             }
@@ -525,37 +532,43 @@ struct MetricsColumn: View {
 
     /// Выделенная строка громкости: крупнее и жирнее обычных метрик.
     @ViewBuilder
-    private func lufsRow(_ name: String, _ hint: String, _ value: Float?) -> some View {
+    private func lufsRow(_ name: String, _ hint: String, _ value: Float?, tooltip: String) -> some View {
         HStack(spacing: 4) {
             Text(showHints ? "\(name) (\(hint))" : name)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
+                .help(tooltip)
             Spacer()
             if let value, value.isFinite {
                 Text(String(format: "%.1f", value))
                     .font(.system(size: 14, design: .monospaced).weight(.bold))
+                    .help(tooltip)
             } else {
                 Text("--")
                     .font(.system(size: 14, design: .monospaced).weight(.bold))
                     .foregroundStyle(.tertiary)
+                    .help(tooltip)
             }
         }
     }
 
     @ViewBuilder
-    private func metricRow(_ name: String, _ hint: String, _ value: Float?) -> some View {
+    private func metricRow(_ name: String, _ hint: String, _ value: Float?, tooltip: String? = nil) -> some View {
         HStack(spacing: 4) {
             Text(showHints ? "\(name) (\(hint))" : name)
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
+                .help(tooltip ?? "")
             Spacer()
             if let value, value.isFinite {
                 Text(String(format: "%.1f", value))
                     .font(.system(size: 10, design: .monospaced).weight(.medium))
+                    .help(tooltip ?? "")
             } else {
                 Text("--")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.tertiary)
+                    .help(tooltip ?? "")
             }
         }
     }
