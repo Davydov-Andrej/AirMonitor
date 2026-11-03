@@ -37,23 +37,6 @@ struct SpectrumView: View {
     private var rtaSettingsMenu: some View {
         HStack(spacing: 8) {
             Menu {
-                ForEach(RTASettings.presets, id: \.name) { preset in
-                    Button {
-                        model.rtaSettings = preset.settings
-                    } label: {
-                        HStack {
-                            Text(preset.name)
-                            if isPreset(preset.settings) {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-            } label: {
-                Label(presetName, systemImage: "gauge.with.needle")
-            }
-
-            Menu {
                 Picker("Полос на октаву", selection: Binding(
                     get: { model.rtaSettings.bandsPerOctave },
                     set: { model.rtaSettings.bandsPerOctave = $0 }
@@ -77,48 +60,56 @@ struct SpectrumView: View {
                 Label("Полосы: 1/\(model.rtaSettings.bandsPerOctave) окт", systemImage: "slider.horizontal.3")
             }
 
-            // Скорость спада: как быстро кривая опускается после пика.
-            // Числа — доля нового значения за шаг (release-коэффициент EMA).
+            // Динамика кривой: атака, спад, сглаживание.
             Menu {
+                Picker("Атака", selection: Binding(
+                    get: { model.rtaSettings.attack },
+                    set: { model.rtaSettings.attack = $0 }
+                )) {
+                    Text("Мгновенная (0.95)").tag(Float(0.95))
+                    Text("Очень быстрая (0.85)").tag(Float(0.85))
+                    Text("Быстрая (0.70)").tag(Float(0.70))
+                    Text("Средняя (0.55)").tag(Float(0.55))
+                    Text("Плавная (0.40)").tag(Float(0.40))
+                    Text("Медленная (0.25)").tag(Float(0.25))
+                    Text("Усреднение (0.12)").tag(Float(0.12))
+                }
+                .pickerStyle(.inline)
+
+                Divider()
+
                 Picker("Спад", selection: Binding(
                     get: { model.rtaSettings.release },
                     set: { model.rtaSettings.release = $0 }
                 )) {
-                    Text("Мгновенный (0.60)").tag(Float(0.6))
+                    Text("Мгновенный (0.60)").tag(Float(0.60))
+                    Text("Очень быстрый (0.40)").tag(Float(0.40))
                     Text("Быстрый (0.25)").tag(Float(0.25))
+                    Text("Средне-быстрый (0.14)").tag(Float(0.14))
                     Text("Средний (0.08)").tag(Float(0.08))
-                    Text("Медленный (0.03)").tag(Float(0.03))
+                    Text("Медленный (0.04)").tag(Float(0.04))
+                    Text("Очень медленный (0.02)").tag(Float(0.02))
                     Text("Усреднение (0.01)").tag(Float(0.01))
                 }
                 .pickerStyle(.inline)
+
+                Divider()
+
+                Picker("Сглаживание", selection: Binding(
+                    get: { model.rtaSettings.neighborSmoothing },
+                    set: { model.rtaSettings.neighborSmoothing = $0 }
+                )) {
+                    Text("Нет — мелкие пики, точные узкие полосы").tag(Int(0))
+                    Text("Соседние ±1").tag(Int(1))
+                    Text("Соседние ±2").tag(Int(2))
+                    Text("Соседние ±3 — ровная кривая").tag(Int(3))
+                    Text("Соседние ±5 — общая картина").tag(Int(5))
+                }
+                .pickerStyle(.inline)
             } label: {
-                Label("Спад: \(releaseName)", systemImage: "arrow.down.right")
+                Label("Динамика", systemImage: "waveform.path.ecg")
             }
         }
-    }
-
-    private var releaseName: String {
-        switch model.rtaSettings.release {
-        case 0.55...: return "мгновенный"
-        case 0.2..<0.55: return "быстрый"
-        case 0.05..<0.2: return "средний"
-        case 0.02..<0.05: return "медленный"
-        default: return "усреднение"
-        }
-    }
-
-    private var presetName: String {
-        for (name, settings) in RTASettings.presets where isPreset(settings) {
-            return name
-        }
-        return "Скорость: своя"
-    }
-
-    private func isPreset(_ s: RTASettings) -> Bool {
-        abs(s.attack - model.rtaSettings.attack) < 0.01
-            && abs(s.release - model.rtaSettings.release) < 0.001
-            && s.bandsPerOctave == model.rtaSettings.bandsPerOctave
-            && s.showFineCurve == model.rtaSettings.showFineCurve
     }
 }
 

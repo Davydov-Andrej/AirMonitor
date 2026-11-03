@@ -9,6 +9,7 @@ struct RTASettingsDTO: Codable {
     var peakHoldSeconds: Float
     var showFineCurve: Bool
     var shortTermSeconds: Double
+    var neighborSmoothing: Int
 
     init(from s: RTASettings) {
         self.bandsPerOctave = s.bandsPerOctave
@@ -17,6 +18,7 @@ struct RTASettingsDTO: Codable {
         self.peakHoldSeconds = s.peakHoldSeconds
         self.showFineCurve = s.showFineCurve
         self.shortTermSeconds = s.shortTermSeconds
+        self.neighborSmoothing = s.neighborSmoothing
     }
 
     func toSettings() -> RTASettings {
@@ -26,7 +28,8 @@ struct RTASettingsDTO: Codable {
             release: release,
             peakHoldSeconds: peakHoldSeconds,
             showFineCurve: showFineCurve,
-            shortTermSeconds: shortTermSeconds
+            shortTermSeconds: shortTermSeconds,
+            neighborSmoothing: neighborSmoothing
         )
     }
 }

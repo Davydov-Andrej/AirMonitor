@@ -53,6 +53,9 @@ public struct RTASettings: Sendable {
     public var showFineCurve: Bool
     /// Окно short-term громкости в секундах (по умолчанию 1 с).
     public var shortTermSeconds: Double
+    /// Сглаживание кривой по соседним полосам (0 = нет, N = ±N полос).
+    /// 0 — мелкие пики узких полос; 3-5 — ровная «общая картина».
+    public var neighborSmoothing: Int
 
     public init(
         bandsPerOctave: Int = 3,
@@ -60,7 +63,8 @@ public struct RTASettings: Sendable {
         release: Float = 0.08,
         peakHoldSeconds: Float = 1.5,
         showFineCurve: Bool = true,
-        shortTermSeconds: Double = 1.0
+        shortTermSeconds: Double = 1.0,
+        neighborSmoothing: Int = 0
     ) {
         self.bandsPerOctave = bandsPerOctave
         self.attack = attack
@@ -68,6 +72,7 @@ public struct RTASettings: Sendable {
         self.peakHoldSeconds = peakHoldSeconds
         self.showFineCurve = showFineCurve
         self.shortTermSeconds = shortTermSeconds
+        self.neighborSmoothing = neighborSmoothing
     }
 
     public static let `default` = RTASettings()
@@ -254,7 +259,29 @@ public final class RTASpectrumAnalyzer {
         return 10 * log10(e)
     }
 
+    /// Скользящее усреднение по соседним полосам (окно ±N).
+    /// 0 = без сглаживания; растёт — кривая ровнее, мелкие пики сглаживаются.
+    private func smoothed(_ values: [Float], radius: Int) -> [Float] {
+        guard radius > 0, values.count > 1 else { return values }
+        var out = [Float](repeating: 0, count: values.count)
+        for i in values.indices {
+            var sum: Float = 0
+            var count = 0
+            for j in max(0, i - radius)...min(values.count - 1, i + radius) {
+                sum += values[j]
+                count += 1
+            }
+            out[i] = sum / Float(count)
+        }
+        return out
+    }
+
     private func publishBands() {
+        // Сглаживание уровней по соседям (настройка «Сглаживание»).
+        let radius = max(0, min(settings.neighborSmoothing, 8))
+        let smoothLevels = smoothed(bandEnergy.map { dBFromEnergy($0) }, radius: radius)
+        let smoothPeaks = smoothed(bandPeak, radius: radius)
+
         var newBands: [RTABand] = []
         newBands.reserveCapacity(bandCenterHz.count)
         let halfWidth = powf(2.0, 1.0 / (2.0 * Float(max(1, settings.bandsPerOctave))))
@@ -265,8 +292,8 @@ public final class RTASpectrumAnalyzer {
                     centerFrequency: center,
                     lowerFrequency: center / halfWidth,
                     upperFrequency: center * halfWidth,
-                    levelDB: dBFromEnergy(bandEnergy[i]),
-                    peakDB: bandPeak[i]
+                    levelDB: smoothLevels[i],
+                    peakDB: smoothPeaks[i]
                 )
             )
         }
@@ -274,10 +301,13 @@ public final class RTASpectrumAnalyzer {
 
         var fine: [SpectrumPoint] = []
         fine.reserveCapacity(fineCenterHz.count)
-        for (i, center) in fineCenterHz.enumerated() {
-            fine.append(
-                SpectrumPoint(id: i, frequency: center, magnitudeDB: dBFromEnergy(fineEnergy[i]))
-            )
+        if settings.showFineCurve {
+            let fineSmoothed = smoothed(fineEnergy.map { dBFromEnergy($0) }, radius: radius * 2)
+            for (i, center) in fineCenterHz.enumerated() {
+                fine.append(
+                    SpectrumPoint(id: i, frequency: center, magnitudeDB: fineSmoothed[i])
+                )
+            }
         }
         fineCurve = fine
         bandsDirty = false

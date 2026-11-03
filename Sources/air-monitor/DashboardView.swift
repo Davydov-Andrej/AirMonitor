@@ -534,10 +534,15 @@ struct MetricsColumn: View {
     @ViewBuilder
     private func lufsRow(_ name: String, _ hint: String, _ value: Float?, tooltip: String) -> some View {
         HStack(spacing: 4) {
-            Text(showHints ? "\(name) (\(hint))" : name)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .help(tooltip)
+            Group {
+                Text(showHints ? "\(name) (\(hint))" : name)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Image(systemName: "info.circle")
+                    .font(.system(size: 7))
+                    .foregroundStyle(.tertiary)
+            }
+            .help(tooltip)
             Spacer()
             if let value, value.isFinite {
                 Text(String(format: "%.1f", value))
@@ -566,10 +571,16 @@ struct MetricsColumn: View {
     @ViewBuilder
     private func metricRow(_ name: String, _ hint: String, _ value: Float?, tooltip: String? = nil) -> some View {
         HStack(spacing: 4) {
-            Text(showHints ? "\(name) (\(hint))" : name)
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-                .help(tooltip ?? Self.tooltips[name] ?? "")
+            Group {
+                Text(showHints ? "\(name) (\(hint))" : name)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                // Значок-индикатор подсказки: наведи мышь — описание.
+                Image(systemName: "info.circle")
+                    .font(.system(size: 7))
+                    .foregroundStyle(.tertiary)
+            }
+            .help(tooltip ?? Self.tooltips[name] ?? "")
             Spacer()
             if let value, value.isFinite {
                 Text(String(format: "%.1f", value))
