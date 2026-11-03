@@ -580,6 +580,10 @@ extension AppModel {
 final class BusSnapshotHolder {
     private let lock = NSLock()
     private var storage: BusSnapshot?
+    /// Монотонный счётчик обновлений: графики рендерятся только когда данные
+    /// изменились (publish 15 Гц против display-link 30 Гц — половина кадров
+    /// иначе перерисовывает то же самое впустую).
+    private var version = 0
     let id: BusID
 
     init(id: BusID) {
@@ -592,9 +596,17 @@ final class BusSnapshotHolder {
         return storage
     }
 
+    /// Текущая версия данных (растёт при каждом update).
+    var dataVersion: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return version
+    }
+
     func update(_ snapshot: BusSnapshot) {
         lock.lock()
         storage = snapshot
+        version += 1
         lock.unlock()
     }
 }

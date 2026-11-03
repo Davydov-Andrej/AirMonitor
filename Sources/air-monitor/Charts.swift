@@ -14,7 +14,8 @@ struct LoudnessHistoryChart: View {
     var body: some View {
         LiveCanvas(
             makeDrawer: { [holder, isStereo] in CGChart.loudnessDrawer(holder: holder, isStereo: isStereo) },
-            makeBackground: { CGChart.loudnessBackground() }
+            makeBackground: { CGChart.loudnessBackground() },
+            dataVersion: { [holder] in holder.dataVersion }
         )
         .background(Color.black.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -28,9 +29,11 @@ struct SpectrumCurveChart: View {
     let holder: BusSnapshotHolder
 
     var body: some View {
-        LiveCanvas { [holder] in
-            CGChart.spectrumDrawer(holder: holder)
-        }
+        LiveCanvas(
+            makeDrawer: { [holder] in CGChart.spectrumDrawer(holder: holder) },
+            makeBackground: { CGChart.spectrumBackground() },
+            dataVersion: { [holder] in holder.dataVersion }
+        )
         .background(Color.black.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
@@ -43,9 +46,10 @@ struct TonalBalanceChart: View {
     let holder: BusSnapshotHolder
 
     var body: some View {
-        LiveCanvas { [holder] in
-            CGChart.balanceDrawer(holder: holder)
-        }
+        LiveCanvas(
+            makeDrawer: { [holder] in CGChart.balanceDrawer(holder: holder) },
+            dataVersion: { [holder] in holder.dataVersion }
+        )
         .background(Color.black.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }

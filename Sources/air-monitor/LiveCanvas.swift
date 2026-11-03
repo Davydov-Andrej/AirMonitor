@@ -90,6 +90,9 @@ final class LiveCanvasNSView: NSView {
     private var needsBackgroundRedraw = true
     /// Рендер статичного фона (сетка/подписи), задаётся вместе с drawer.
     var backgroundRenderer: ((_ ctx: CGContext, _ size: CGSize) -> Void)?
+    /// Версия данных: кадр рисуется только если версия изменилась.
+    var versionProvider: (() -> Int)?
+    private var lastDrawnVersion: Int = -1
 
     func frameTick() {
         stateLock.lock()
@@ -100,9 +103,20 @@ final class LiveCanvasNSView: NSView {
         // Троттлинг кадров.
         let now = CFAbsoluteTimeGetCurrent()
         guard now - lastRenderTime >= minFrameInterval else { return }
+
+        // Пропуск кадров без новых данных: publish 15 Гц, display-link 30 Гц —
+        // иначе половина кадров перерисовывает одинаковый битмап (x N шин).
+        if let vp = versionProvider {
+            let v = vp()
+            if v == lastDrawnVersion { return }
+            lastDrawnVersion = v
+        }
         lastRenderTime = now
 
-        let scale = window?.backingScaleFactor ?? 2
+        // Рендер в 1x (не Retina 2x): линии 1px на графике всё равно сглаживаются,
+        // а пикселей в 4 раза меньше — clear/blit/текстура дешевле вчетверо.
+        // CoreAnimation масштабирует содержимое без потерь для такого контента.
+        let scale: CGFloat = 1
         let w = max(1, Int(bounds.width * scale))
         let h = max(1, Int(bounds.height * scale))
 
@@ -190,17 +204,22 @@ private final class DisplayLinkProxy: NSObject {
 struct LiveCanvas: NSViewRepresentable {
     let makeDrawer: () -> (CGContext, CGSize) -> Void
     var makeBackground: (() -> (CGContext, CGSize) -> Void)?
+    /// Источник версии данных: nil = рисовать каждый кадр.
+    var dataVersion: (() -> Int)?
 
     init(makeDrawer: @escaping () -> (CGContext, CGSize) -> Void,
-         makeBackground: (() -> (CGContext, CGSize) -> Void)? = nil) {
+         makeBackground: (() -> (CGContext, CGSize) -> Void)? = nil,
+         dataVersion: (() -> Int)? = nil) {
         self.makeDrawer = makeDrawer
         self.makeBackground = makeBackground
+        self.dataVersion = dataVersion
     }
 
     func makeNSView(context: Context) -> LiveCanvasNSView {
         let v = LiveCanvasNSView(frame: .zero)
         v.drawer = makeDrawer()
         v.backgroundRenderer = makeBackground?()
+        v.versionProvider = dataVersion
         return v
     }
 
