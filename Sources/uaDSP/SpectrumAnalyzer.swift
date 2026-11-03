@@ -285,12 +285,15 @@ public final class RTASpectrumAnalyzer {
         for i in values.indices {
             var sum: Float = values[i]
             var weight: Float = 1
-            // соседи: ближнее кольцо — вес 1, «частичное» внешнее — вес frac
-            for d in 1...full {
-                let w: Float = (d <= full - (frac > 0.01 ? 0 : 1)) ? 1 : frac
-                if i - d >= 0 { sum += values[i - d] * w; weight += w }
-                if i + d < values.count { sum += values[i + d] * w; weight += w }
+            // полные кольца соседей (вес 1): d = 1...full
+            if full >= 1 {
+                for d in 1...full {
+                    if i - d >= 0 { sum += values[i - d]; weight += 1 }
+                    if i + d < values.count { sum += values[i + d]; weight += 1 }
+                }
             }
+            // частичное кольцо (вес frac): d = full+1 при дробном радиусе;
+            // при radius < 1 (full=0) — это единственное кольцо, d = 1.
             if frac > 0.01 {
                 let d = full + 1
                 if i - d >= 0 { sum += values[i - d] * frac; weight += frac }
