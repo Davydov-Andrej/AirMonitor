@@ -35,6 +35,10 @@ final class LiveCanvasNSView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        // Colorspace экрана — чтобы makeImage() не гонял цветоконверсию.
+        if let screen = window?.screen ?? NSScreen.main {
+            cachedColorSpace = screen.colorSpace?.cgColorSpace
+        }
         stateLock.lock()
         let link = self.displayLink
         let visible = window != nil
@@ -60,6 +64,9 @@ final class LiveCanvasNSView: NSView {
     private var bitmapCtx: CGContext?
     private var bitmapSize: (w: Int, h: Int) = (0, 0)
     private let bitmapLock = NSLock()
+    /// Colorspace layer'а/экрана: создание битмапа в нём исключает
+    /// цветоконверсию (vImage AnyToAny — 21% main в профиле).
+    private var cachedColorSpace: CGColorSpace?
 
     func frameTick() {
         stateLock.lock()
@@ -79,10 +86,11 @@ final class LiveCanvasNSView: NSView {
         // Переиспользуем контекст, пересоздаём только при изменении размера.
         bitmapLock.lock()
         if bitmapCtx == nil || bitmapSize.w != w || bitmapSize.h != h {
+            let space = cachedColorSpace ?? CGColorSpaceCreateDeviceRGB()
             bitmapCtx = CGContext(
                 data: nil, width: w, height: h,
                 bitsPerComponent: 8, bytesPerRow: w * 4,
-                space: CGColorSpaceCreateDeviceRGB(),
+                space: space,
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
             )
             bitmapSize = (w, h)
@@ -105,10 +113,24 @@ final class LiveCanvasNSView: NSView {
         drawer(ctx, bounds.size)
         ctx.restoreGState()
 
-        if let image = ctx.makeImage() {
-            DispatchQueue.main.async { [weak self] in
-                self?.layer?.contents = image
-                self?.layer?.contentsGravity = .resize
+        // IOAccelerator-совместимый путь: CGImage без копии буфера через
+        // data provider (makeImage копирует весь битмап каждый кадр).
+        if let data = ctx.data {
+            let release: CGDataProviderReleaseDataCallback = { _, _, _ in }
+            let provider = CGDataProvider(dataInfo: nil, data: data, size: w * h * 4, releaseData: release)
+            if let provider, let image = CGImage(
+                width: w, height: h,
+                bitsPerComponent: 8, bitsPerPixel: 32,
+                bytesPerRow: w * 4,
+                space: ctx.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                provider: provider, decode: nil, shouldInterpolate: false,
+                intent: .defaultIntent
+            ) {
+                DispatchQueue.main.async { [weak self] in
+                    self?.layer?.contents = image
+                    self?.layer?.contentsGravity = .resize
+                }
             }
         }
     }
