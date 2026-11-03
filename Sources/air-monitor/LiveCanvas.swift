@@ -92,6 +92,12 @@ final class LiveCanvasNSView: NSView {
         guard let ctx else { return }
 
         // CGContext битмапа: Y снизу-вверх, как в AppKit. Флип для совместимости.
+        // Очистка от предыдущего кадра (контекст переиспользуется — без этого
+        // кадры накапливаются: линии «размножаются», изображение контрастнеет).
+        ctx.clear(CGRect(x: 0, y: 0, width: CGFloat(w), height: CGFloat(h)))
+        ctx.setFillColor(CGColor(colorSpace: CGColorSpaceCreateDeviceRGB(), components: [0, 0, 0, 0])!)
+        ctx.fill(CGRect(x: 0, y: 0, width: CGFloat(w), height: CGFloat(h)))
+
         ctx.saveGState()
         ctx.translateBy(x: 0, y: CGFloat(h))
         ctx.scaleBy(x: scale, y: -scale)
