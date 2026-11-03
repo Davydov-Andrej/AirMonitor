@@ -84,6 +84,12 @@ final class LiveCanvasNSView: NSView {
     /// цветоконверсию (vImage AnyToAny — 21% main в профиле).
     /// Пишется на main (viewDidMoveToWindow), читается на link-потоке.
     nonisolated(unsafe) private var cachedColorSpace: CGColorSpace?
+    /// Фоновый слой (сетка+подписи): рисуется один раз, blit-ится в каждый кадр.
+    /// Снимает ~40% стоимости кадра (текст — самая дорогая часть отрисовки).
+    private var backgroundLayer: CGImage?
+    private var needsBackgroundRedraw = true
+    /// Рендер статичного фона (сетка/подписи), задаётся вместе с drawer.
+    var backgroundRenderer: ((_ ctx: CGContext, _ size: CGSize) -> Void)?
 
     func frameTick() {
         stateLock.lock()
@@ -111,6 +117,7 @@ final class LiveCanvasNSView: NSView {
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
             )
             bitmapSize = (w, h)
+            needsBackgroundRedraw = true
         }
         let ctx = bitmapCtx
         bitmapLock.unlock()
@@ -119,9 +126,27 @@ final class LiveCanvasNSView: NSView {
         // CGContext битмапа: Y снизу-вверх, как в AppKit. Флип для совместимости.
         // Очистка от предыдущего кадра (контекст переиспользуется — без этого
         // кадры накапливаются: линии «размножаются», изображение контрастнеет).
+        // clear() обнуляет байты напрямую (memset) — без alpha-blend.
         ctx.clear(CGRect(x: 0, y: 0, width: CGFloat(w), height: CGFloat(h)))
-        ctx.setFillColor(CGColor(colorSpace: CGColorSpaceCreateDeviceRGB(), components: [0, 0, 0, 0])!)
-        ctx.fill(CGRect(x: 0, y: 0, width: CGFloat(w), height: CGFloat(h)))
+
+        // Blit закэшированного фона (сетка+подписи) вместо его перерисовки.
+        if needsBackgroundRedraw || backgroundLayer == nil {
+            if let bgRenderer = backgroundRenderer {
+                // Фон рисуется в ТЕХ ЖЕ координатах, что и динамика (флип).
+                ctx.saveGState()
+                ctx.translateBy(x: 0, y: CGFloat(h))
+                ctx.scaleBy(x: scale, y: -scale)
+                bgRenderer(ctx, bounds.size)
+                ctx.restoreGState()
+                backgroundLayer = ctx.makeImage()
+                needsBackgroundRedraw = false
+                ctx.clear(CGRect(x: 0, y: 0, width: CGFloat(w), height: CGFloat(h)))
+            }
+        }
+        if let bg = backgroundLayer {
+            // bg уже в экранных координатах — рисуем напрямую, без флипа.
+            ctx.draw(bg, in: CGRect(x: 0, y: 0, width: CGFloat(w), height: CGFloat(h)))
+        }
 
         ctx.saveGState()
         ctx.translateBy(x: 0, y: CGFloat(h))
@@ -164,10 +189,18 @@ private final class DisplayLinkProxy: NSObject {
 /// замыкание создаётся один раз, и drawer сам читает свежие данные каждый кадр.
 struct LiveCanvas: NSViewRepresentable {
     let makeDrawer: () -> (CGContext, CGSize) -> Void
+    var makeBackground: (() -> (CGContext, CGSize) -> Void)?
+
+    init(makeDrawer: @escaping () -> (CGContext, CGSize) -> Void,
+         makeBackground: (() -> (CGContext, CGSize) -> Void)? = nil) {
+        self.makeDrawer = makeDrawer
+        self.makeBackground = makeBackground
+    }
 
     func makeNSView(context: Context) -> LiveCanvasNSView {
         let v = LiveCanvasNSView(frame: .zero)
         v.drawer = makeDrawer()
+        v.backgroundRenderer = makeBackground?()
         return v
     }
 

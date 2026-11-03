@@ -10,6 +10,89 @@ enum CGChart {
 
     // MARK: - Спектр (АЧХ)
 
+    /// Статичная сетка+подписи: переиспользуется между кадрами без пересчёта.
+    static func drawGrid(ctx: CGContext, size: CGSize,
+                         dbLabels: [Int], freqLabels: [(Float, String)],
+                         xPos: (Float, CGFloat) -> CGFloat,
+                         yPos: (Float, CGFloat) -> CGFloat) {
+        let labelAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 8),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ]
+        for db in dbLabels {
+            let y = yPos(Float(db), size.height)
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: 0, y: y))
+            path.addLine(to: CGPoint(x: size.width, y: y))
+            stroke(ctx, path, color: .gray, width: 0.5, alpha: 0.15)
+            drawText(NSAttributedString(string: "\(db)", attributes: labelAttrs),
+                     at: CGPoint(x: 4, y: y + 1), height: size.height)
+        }
+        for (freq, label) in freqLabels {
+            let fx = xPos(freq, size.width)
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: fx, y: 0))
+            path.addLine(to: CGPoint(x: fx, y: size.height))
+            stroke(ctx, path, color: .gray, width: 0.5, alpha: 0.12)
+            drawText(NSAttributedString(string: label, attributes: labelAttrs),
+                     at: CGPoint(x: fx + 3, y: size.height - 12), height: size.height)
+        }
+    }
+
+    /// Статичный фон спектра: сетка + подписи (кэшируется LiveCanvas).
+    static func spectrumBackground() -> (CGContext, CGSize) -> Void {
+        let dbLabels = [10, -2, -14, -26, -38, -50, -62, -74, -86]
+        let freqLabels: [(Float, String)] = [
+            (63, "63"), (250, "250"), (1000, "1k"), (4000, "4k"), (16000, "16k")
+        ]
+        let minDB: Float = -90
+        let maxDB: Float = 10
+        func xPos(_ freq: Float, width: CGFloat) -> CGFloat {
+            let t = (log10f(max(freq, 20)) - log10f(20)) / (log10f(20000) - log10f(20))
+            return CGFloat(max(0, min(1, t))) * width
+        }
+        func yPos(_ db: Float, height: CGFloat) -> CGFloat {
+            let t = (db - minDB) / (maxDB - minDB)
+            return height * (1 - CGFloat(max(0, min(1, t))))
+        }
+        return { ctx, size in
+            drawGrid(ctx: ctx, size: size, dbLabels: dbLabels, freqLabels: freqLabels,
+                     xPos: xPos, yPos: yPos)
+        }
+    }
+
+    /// Статичный фон громкости: сетка LU + целевая линия (кэшируется LiveCanvas).
+    static func loudnessBackground() -> (CGContext, CGSize) -> Void {
+        let minLU: Float = -40
+        let maxLU: Float = 0
+        let target: Float = -23
+        func yPos(_ lu: Float, height: CGFloat) -> CGFloat {
+            height * (1 - CGFloat((lu - minLU) / (maxLU - minLU)))
+        }
+        return { ctx, size in
+            let labelAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 8),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]
+            var lu = minLU + 10
+            while lu < maxLU {
+                let y = yPos(lu, height: size.height)
+                let path = CGMutablePath()
+                path.move(to: CGPoint(x: 0, y: y))
+                path.addLine(to: CGPoint(x: size.width, y: y))
+                stroke(ctx, path, color: .gray, width: 0.5, alpha: 0.15)
+                drawText(NSAttributedString(string: "\(Int(lu))", attributes: labelAttrs),
+                         at: CGPoint(x: 3, y: y + 1), height: size.height)
+                lu += 10
+            }
+            let ty = yPos(target, height: size.height)
+            let targetPath = CGMutablePath()
+            targetPath.move(to: CGPoint(x: 0, y: ty))
+            targetPath.addLine(to: CGPoint(x: size.width, y: ty))
+            stroke(ctx, targetPath, color: .systemGreen, width: 1, alpha: 0.45, dash: [4, 3])
+        }
+    }
+
     static func spectrumDrawer(holder: BusSnapshotHolder) -> (CGContext, CGSize) -> Void {
         // Данные резолвятся КАЖДЫЙ кадр: holder живой, snapshot обновляется DSP-потоком.
         let drawer = spectrumDrawerBuilder()
@@ -38,32 +121,8 @@ enum CGChart {
         }
 
         return { ctx, size, fine, bands in
-            let labelAttrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 8),
-                .foregroundColor: NSColor.secondaryLabelColor,
-            ]
-
-            // Сетка по Y + подписи дБ
-            for db in dbLabels {
-                let y = yPos(Float(db), height: size.height)
-                let path = CGMutablePath()
-                path.move(to: CGPoint(x: 0, y: y))
-                path.addLine(to: CGPoint(x: size.width, y: y))
-                stroke(ctx, path, color: .gray, width: 0.5, alpha: 0.15)
-                drawText(NSAttributedString(string: "\(db)", attributes: labelAttrs),
-                         at: CGPoint(x: 4, y: y + 1), height: size.height)
-            }
-
-            // Тики частот + подписи
-            for (freq, label) in freqLabels {
-                let fx = xPos(freq, width: size.width)
-                let path = CGMutablePath()
-                path.move(to: CGPoint(x: fx, y: 0))
-                path.addLine(to: CGPoint(x: fx, y: size.height))
-                stroke(ctx, path, color: .gray, width: 0.5, alpha: 0.12)
-                drawText(NSAttributedString(string: label, attributes: labelAttrs),
-                         at: CGPoint(x: fx + 3, y: size.height - 12), height: size.height)
-            }
+            drawGrid(ctx: ctx, size: size, dbLabels: dbLabels, freqLabels: freqLabels,
+                     xPos: xPos, yPos: yPos)
 
             // Октавные полосы + пик-холд
             if !bands.isEmpty {

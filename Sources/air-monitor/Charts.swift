@@ -12,12 +12,10 @@ struct LoudnessHistoryChart: View {
     var isStereo: Bool = false
 
     var body: some View {
-        LiveCanvas { [holder, isStereo] in
-            CGChart.loudnessDrawer(
-                holder: holder,
-                isStereo: isStereo
-            )
-        }
+        LiveCanvas(
+            makeDrawer: { [holder, isStereo] in CGChart.loudnessDrawer(holder: holder, isStereo: isStereo) },
+            makeBackground: { CGChart.loudnessBackground() }
+        )
         .background(Color.black.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
