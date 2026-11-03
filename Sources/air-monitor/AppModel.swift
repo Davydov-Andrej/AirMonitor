@@ -361,20 +361,11 @@ final class AppModel: ObservableObject {
         }
         holdersLock.unlock()
 
+        // Замыкание НЕ изолировано MainActor: вызывается с analysis-очереди 60 раз/с.
+        // AppModel — @MainActor, поэтому вся работа вынесена в nonisolated-метод
+        // (иначе dispatch_assert_queue крашит при обращении к self из DSP-потока).
         publisher.setOnSnapshot { [weak self] snapshot in
-            // Горячий путь (до 60 раз/с): только запись в lock-хранилища.
-            // MainActor не задействован — UI читает данные по TimelineView.
-            guard let self else { return }
-            let newOrder = snapshot.buses.map(\.id)
-            if newOrder != self.currentOrder {
-                self.currentOrder = newOrder
-                Task { @MainActor [weak self] in
-                    self?.syncOrderFromSnapshot(newOrder)
-                }
-            }
-            for bus in snapshot.buses {
-                self.holders[bus.id]?.update(bus)
-            }
+            self?.ingestSnapshot(snapshot)
         }
 
         // Старт AUHAL блокирует main на ~1-2 с (AudioDeviceCreateIOProcID внутри
@@ -419,8 +410,33 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Порядок шин последнего снапшота (сравнение из DSP-потока, Guarded by holdersLock не требуется — записывается только тут).
-    private var currentOrder: [BusID] = []
+    /// Порядок шин последнего снапшота. Пишется из DSP-потока, читается оттуда же;
+    /// MainActor читает через syncOrderFromSnapshot — под orderLock.
+    nonisolated(unsafe) private var currentOrder: [BusID] = []
+    nonisolated private let orderLock = NSLock()
+
+    /// Горячий путь доставки снимков (DSP-поток, nonisolated).
+    /// Только lock-защищённые поля — MainActor не трогается.
+    nonisolated private func ingestSnapshot(_ snapshot: AppSnapshot) {
+        let newOrder = snapshot.buses.map(\.id)
+        orderLock.lock()
+        let changed = newOrder != currentOrder
+        if changed { currentOrder = newOrder }
+        orderLock.unlock()
+        if changed {
+            Task { @MainActor [weak self] in
+                self?.syncOrderFromSnapshot(newOrder)
+            }
+        }
+        holdersLock.lock()
+        let targets = snapshot.buses.compactMap { bus in
+            (bus, holders[bus.id])
+        }
+        holdersLock.unlock()
+        for (busSnapshot, holder) in targets {
+            holder?.update(busSnapshot)
+        }
+    }
     /// Флаг изменения порядка (ставится из DSP-потока, снимается на MainActor).
     private let orderChangedLock = NSLock()
     private var orderChangedPending: [BusID]? = nil
@@ -436,8 +452,8 @@ final class AppModel: ObservableObject {
         )
     }
 
-    private var holders: [BusID: BusSnapshotHolder] = [:]
-    private let holdersLock = NSLock()
+    nonisolated(unsafe) private var holders: [BusID: BusSnapshotHolder] = [:]
+    nonisolated private let holdersLock = NSLock()
 
     func stopCapture() {
         isCapturing = false

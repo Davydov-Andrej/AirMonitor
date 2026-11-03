@@ -8,7 +8,23 @@ import yaCore
 /// график обновляется даже когда окно активно и event-loop занят
 /// обработкой событий мыши — именно это было причиной «пропадающей» АЧХ.
 final class LiveCanvasNSView: NSView {
-    var drawer: ((CGContext, CGSize) -> Void)?
+    /// Замыкание отрисовки: пишется с main (updateNSView), читается на
+    /// display-link потоке — под локом (замыкание — не атомарный тип).
+    private var drawerStorage: ((CGContext, CGSize) -> Void)?
+
+    var drawer: ((CGContext, CGSize) -> Void)? {
+        get {
+            drawerLock.lock()
+            defer { drawerLock.unlock() }
+            return drawerStorage
+        }
+        set {
+            drawerLock.lock()
+            drawerStorage = newValue
+            drawerLock.unlock()
+        }
+    }
+    private let drawerLock = NSLock()
     nonisolated(unsafe) private var displayLink: CVDisplayLink?
     private let proxy = DisplayLinkProxy()
     private let stateLock = NSLock()
@@ -66,7 +82,8 @@ final class LiveCanvasNSView: NSView {
     private let bitmapLock = NSLock()
     /// Colorspace layer'а/экрана: создание битмапа в нём исключает
     /// цветоконверсию (vImage AnyToAny — 21% main в профиле).
-    private var cachedColorSpace: CGColorSpace?
+    /// Пишется на main (viewDidMoveToWindow), читается на link-потоке.
+    nonisolated(unsafe) private var cachedColorSpace: CGColorSpace?
 
     func frameTick() {
         stateLock.lock()
@@ -113,24 +130,14 @@ final class LiveCanvasNSView: NSView {
         drawer(ctx, bounds.size)
         ctx.restoreGState()
 
-        // IOAccelerator-совместимый путь: CGImage без копии буфера через
-        // data provider (makeImage копирует весь битмап каждый кадр).
-        if let data = ctx.data {
-            let release: CGDataProviderReleaseDataCallback = { _, _, _ in }
-            let provider = CGDataProvider(dataInfo: nil, data: data, size: w * h * 4, releaseData: release)
-            if let provider, let image = CGImage(
-                width: w, height: h,
-                bitsPerComponent: 8, bitsPerPixel: 32,
-                bytesPerRow: w * 4,
-                space: ctx.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                provider: provider, decode: nil, shouldInterpolate: false,
-                intent: .defaultIntent
-            ) {
-                DispatchQueue.main.async { [weak self] in
-                    self?.layer?.contents = image
-                    self?.layer?.contentsGravity = .resize
-                }
+        // ВАЖНО: makeImage() копирует буфер — это обязательная цена безопасности.
+        // Zero-copy вариант (CGDataProvider поверх ctx.data) вызывал SEGFAULT:
+        // CA читала память с display-link потока, пока мы её перезаписывали
+        // следующим кадром (краш: CGDataProvider_BufferIsNotReadable).
+        if let image = ctx.makeImage() {
+            DispatchQueue.main.async { [weak self] in
+                self?.layer?.contents = image
+                self?.layer?.contentsGravity = .resize
             }
         }
     }

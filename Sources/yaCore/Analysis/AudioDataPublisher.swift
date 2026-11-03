@@ -341,7 +341,20 @@ public final class AudioDataPublisher: @unchecked Sendable {
 
 /// Рантайм одной шины: анализаторы каналов/стерео.
 public final class BusRuntime: @unchecked Sendable {
-    public var config: MonitorBusConfig
+    public var config: MonitorBusConfig {
+        get {
+            configLock.lock()
+            defer { configLock.unlock() }
+            return configStorage
+        }
+        set {
+            configLock.lock()
+            configStorage = newValue
+            configLock.unlock()
+        }
+    }
+    private var configStorage: MonitorBusConfig
+    private let configLock = NSLock()
     public let deviceID: AudioDeviceID
     public let monoAnalyzers: [Int: ChannelAnalyzerSet]
     public let stereoAnalyzer: StereoAnalyzerSet?
@@ -352,7 +365,7 @@ public final class BusRuntime: @unchecked Sendable {
         monoAnalyzers: [Int: ChannelAnalyzerSet],
         stereoAnalyzer: StereoAnalyzerSet?
     ) {
-        self.config = config
+        self.configStorage = config
         self.deviceID = deviceID
         self.monoAnalyzers = monoAnalyzers
         self.stereoAnalyzer = stereoAnalyzer

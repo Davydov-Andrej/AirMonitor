@@ -22,11 +22,41 @@ final class AudioCaptureImpl {
     private var bufferFrames = 0
 
     /// Вызывается на фоне (не на аудио-потоке) с собранным кадром.
-    var onFrame: (@Sendable (Frame) -> Void)?
+    /// Пишется с main (setDestination), читается на consumerQueue — под локом.
+    private var onFrameStorage: (@Sendable (Frame) -> Void)?
+    private let onFrameLock = NSLock()
+
+    var onFrame: (@Sendable (Frame) -> Void)? {
+        get {
+            onFrameLock.lock()
+            defer { onFrameLock.unlock() }
+            return onFrameStorage
+        }
+        set {
+            onFrameLock.lock()
+            onFrameStorage = newValue
+            onFrameLock.unlock()
+        }
+    }
 
     /// Каналы, которые реально нужны. Пусто = все. Фильтрация происходит
     /// прямо в render-колбэке — лишние каналы не копируются вообще.
-    var wantedChannels: Set<Int> = []
+    /// Пишется с main (updateWantedChannels), читается на аудио-потоке — под локом.
+    private var wantedStorage: Set<Int> = []
+    private let wantedLock = NSLock()
+
+    var wantedChannels: Set<Int> {
+        get {
+            wantedLock.lock()
+            defer { wantedLock.unlock() }
+            return wantedStorage
+        }
+        set {
+            wantedLock.lock()
+            wantedStorage = newValue
+            wantedLock.unlock()
+        }
+    }
 
     /// Связанные с инстансом данные для render-колбэка (без захвата контекста).
     private var context = CaptureContext()
@@ -124,11 +154,12 @@ final class AudioCaptureImpl {
         guard channelCount > 0, frames > 0 else { return }
 
         let list = UnsafeMutableAudioBufferListPointer(abl)
+        let wanted = wantedChannels  // один снимок под локом
         var channels: [(Int, [Float])] = []
-        channels.reserveCapacity(wantedChannels.isEmpty ? channelCount : min(wantedChannels.count, channelCount))
+        channels.reserveCapacity(wanted.isEmpty ? channelCount : min(wanted.count, channelCount))
 
         for c in 0..<channelCount {
-            if !wantedChannels.isEmpty && !wantedChannels.contains(c) { continue }
+            if !wanted.isEmpty && !wanted.contains(c) { continue }
             guard c < list.count else { break }
             let buffer = list[c]
             guard let data = buffer.mData else { continue }
@@ -238,17 +269,23 @@ final class AudioCaptureImpl {
 
     private func teardown(unit: AudioUnit) {
         AudioOutputUnitStop(unit)
+        // После AudioOutputUnitStop колбэков больше не будет — но колбэк,
+        // УЖЕ вошедший в captureRenderCallback, мог пройти guard до stop.
+        // Асинхронно освобождаем память с запасом 100 мс, чтобы любой
+        // «зависший» в колбэке кадр успел дочитаться (иначе use-after-free).
+        let storageToFree = bufferListStorage
+        let buffersToFree = channelBuffers
+        bufferListStorage = nil
+        channelBuffers = []
+        context.abl = nil
+        if storageToFree != nil || !buffersToFree.isEmpty {
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) {
+                if let st = storageToFree { st.deallocate() }
+                for b in buffersToFree { b.deallocate() }
+            }
+        }
         AudioUnitUninitialize(unit)
         AudioComponentInstanceDispose(unit)
-        context.abl = nil
-        if let storage = bufferListStorage {
-            storage.deallocate()
-            bufferListStorage = nil
-        }
-        for buf in channelBuffers {
-            buf.deallocate()
-        }
-        channelBuffers = []
     }
 
     private func makeInputUnit() -> AudioUnit? {
