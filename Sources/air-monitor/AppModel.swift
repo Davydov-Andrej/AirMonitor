@@ -272,6 +272,9 @@ final class AppModel: ObservableObject {
     func removeBus(id: BusID) {
         buses.removeAll { $0.config.id == id }
         publisher?.removeBus(id: id)
+        holdersLock.lock()
+        holders.removeValue(forKey: id)
+        holdersLock.unlock()
         syncBusOrder()
         autosaveCurrentScene()
     }
@@ -355,9 +358,19 @@ final class AppModel: ObservableObject {
 
         // Регистрируем холдеры ДО старта: publish пишет в них напрямую с
         // DSP-очереди (потокобезопасно, без прыжков в MainActor).
+        // ВАЖНО: переиспользуем СУЩЕСТВУЮЩИЕ holders — SwiftUI-графики держат
+        // ссылку на holder через замыкание versionProvider; пересоздание рвёт
+        // связь и версионный гейт блокирует отрисовку навсегда.
         holdersLock.lock()
         for bus in buses {
-            holders[bus.config.id] = BusSnapshotHolder(id: bus.config.id)
+            if holders[bus.config.id] == nil {
+                holders[bus.config.id] = BusSnapshotHolder(id: bus.config.id)
+            }
+        }
+        // Удаляем holders ушедших шин.
+        let activeIDs = Set(buses.map { $0.config.id })
+        for stale in holders.keys where !activeIDs.contains(stale) {
+            holders.removeValue(forKey: stale)
         }
         holdersLock.unlock()
 
