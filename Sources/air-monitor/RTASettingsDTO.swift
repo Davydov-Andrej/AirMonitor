@@ -9,7 +9,7 @@ struct RTASettingsDTO: Codable {
     var peakHoldSeconds: Float
     var showFineCurve: Bool
     var shortTermSeconds: Double
-    var neighborSmoothing: Int
+    var neighborSmoothing: Float
 
     init(from s: RTASettings) {
         self.bandsPerOctave = s.bandsPerOctave

@@ -55,7 +55,7 @@ public struct RTASettings: Sendable {
     public var shortTermSeconds: Double
     /// Сглаживание кривой по соседним полосам (0 = нет, N = ±N полос).
     /// 0 — мелкие пики узких полос; 3-5 — ровная «общая картина».
-    public var neighborSmoothing: Int
+    public var neighborSmoothing: Float
 
     public init(
         bandsPerOctave: Int = 3,
@@ -64,7 +64,7 @@ public struct RTASettings: Sendable {
         peakHoldSeconds: Float = 1.5,
         showFineCurve: Bool = true,
         shortTermSeconds: Double = 1.0,
-        neighborSmoothing: Int = 0
+        neighborSmoothing: Float = 0
     ) {
         self.bandsPerOctave = bandsPerOctave
         self.attack = attack
@@ -196,7 +196,11 @@ public final class RTASpectrumAnalyzer {
         bandPeakTicks = [Float](repeating: 0, count: oct.ranges.count)
 
         if settings.showFineCurve {
-            let fine = buildGrid(Self.finePointsPerOctave)
+            // Тонкая кривая масштабируется с настройкой полос: детали растут вместе.
+            // Cap 24 полос/окт (288 точек): выше — отрисовка растёт, пользы нет
+            // (окно FFT 4096 всё равно не разрешает уже 1/24 октавы на низах).
+            let finePPO = min(24, max(6, Float(max(1, settings.bandsPerOctave)) * 4))
+            let fine = buildGrid(finePPO)
             fineCenterHz = fine.centers
             fineRange = fine.ranges
             fineEnergy = [Float](repeating: 1e-12, count: fine.ranges.count)
@@ -210,13 +214,24 @@ public final class RTASpectrumAnalyzer {
         publishBands()
     }
 
-    /// Разрешение тонкой кривой (полос на октаву).
-    nonisolated(unsafe) public static var finePointsPerOctave: Float = 12
-
     private func integrate(_ power: [Float]) {
         let attack = max(0.001, settings.attack)
         let release = min(1.0, max(0.001, settings.release))
         let peakTicks = settings.peakHoldSeconds * 60
+
+        // EMA с честной постоянной времени: alpha зависит от фактического
+        // интервала между FFT (иначе при 47 FFT/с и alpha 0.95 атака сходится
+        // за 2 кадра и не отличается от 0.25 при постоянном сигнале).
+        // attack/release трактуются как доля за 60 Гц-кадр:
+        // tau = -frame / ln(1 - alpha), alphaPerFFT = 1 - exp(-fftInterval / tau).
+        let fftInterval = fft.sampleRate > 0 ? Float(fft.length / 4) / fft.sampleRate : 1.0 / 60.0
+        func alphaPerFFT(_ base: Float) -> Float {
+            let clamped = min(0.999, max(0.001, base))
+            let tau60 = -1.0 / 60.0 / log(1.0 - clamped)
+            return Float(1.0 - exp(-Double(fftInterval) / Double(tau60)))
+        }
+        let attackAlpha = alphaPerFFT(attack)
+        let releaseAlpha = alphaPerFFT(release)
 
         // Октавные полосы: интеграл энергии (сумма, не среднее).
         for i in 0..<bandRange.count {
@@ -224,7 +239,7 @@ public final class RTASpectrumAnalyzer {
             guard range.upperBound <= power.count else { continue }
             var sum: Float = 0
             for b in range { sum += power[b] }
-            let alpha = sum > bandEnergy[i] ? attack : release
+            let alpha = sum > bandEnergy[i] ? attackAlpha : releaseAlpha
             bandEnergy[i] += alpha * (sum - bandEnergy[i])
             let db = dBFromEnergy(bandEnergy[i])
             if db > bandPeak[i] {
@@ -245,7 +260,7 @@ public final class RTASpectrumAnalyzer {
             guard range.upperBound <= power.count else { continue }
             var sum: Float = 0
             for b in range { sum += power[b] }
-            let alpha = sum > fineEnergy[i] ? attack : release
+            let alpha = sum > fineEnergy[i] ? attackAlpha : releaseAlpha
             fineEnergy[i] += alpha * (sum - fineEnergy[i])
         }
 
@@ -259,26 +274,36 @@ public final class RTASpectrumAnalyzer {
         return 10 * log10(e)
     }
 
-    /// Скользящее усреднение по соседним полосам (окно ±N).
-    /// 0 = без сглаживания; растёт — кривая ровнее, мелкие пики сглаживаются.
-    private func smoothed(_ values: [Float], radius: Int) -> [Float] {
-        guard radius > 0, values.count > 1 else { return values }
+    /// Скользящее усреднение по соседним полосам.
+    /// radius: 0 = без сглаживания; целое N = окно ±N; промежуточные (0.5, 1.5)
+    /// дают взвешенное окно — мягкая градация между целыми шагами.
+    private func smoothed(_ values: [Float], radius: Float) -> [Float] {
+        guard radius > 0.01, values.count > 1 else { return values }
+        let full = Int(radius)
+        let frac = radius - Float(full)
         var out = [Float](repeating: 0, count: values.count)
         for i in values.indices {
-            var sum: Float = 0
-            var count = 0
-            for j in max(0, i - radius)...min(values.count - 1, i + radius) {
-                sum += values[j]
-                count += 1
+            var sum: Float = values[i]
+            var weight: Float = 1
+            // соседи: ближнее кольцо — вес 1, «частичное» внешнее — вес frac
+            for d in 1...full {
+                let w: Float = (d <= full - (frac > 0.01 ? 0 : 1)) ? 1 : frac
+                if i - d >= 0 { sum += values[i - d] * w; weight += w }
+                if i + d < values.count { sum += values[i + d] * w; weight += w }
             }
-            out[i] = sum / Float(count)
+            if frac > 0.01 {
+                let d = full + 1
+                if i - d >= 0 { sum += values[i - d] * frac; weight += frac }
+                if i + d < values.count { sum += values[i + d] * frac; weight += frac }
+            }
+            out[i] = sum / weight
         }
         return out
     }
 
     private func publishBands() {
         // Сглаживание уровней по соседям (настройка «Сглаживание»).
-        let radius = max(0, min(settings.neighborSmoothing, 8))
+        let radius = Float(max(0, min(settings.neighborSmoothing, 12)))
         let smoothLevels = smoothed(bandEnergy.map { dBFromEnergy($0) }, radius: radius)
         let smoothPeaks = smoothed(bandPeak, radius: radius)
 
@@ -302,7 +327,7 @@ public final class RTASpectrumAnalyzer {
         var fine: [SpectrumPoint] = []
         fine.reserveCapacity(fineCenterHz.count)
         if settings.showFineCurve {
-            let fineSmoothed = smoothed(fineEnergy.map { dBFromEnergy($0) }, radius: radius * 2)
+            let fineSmoothed = smoothed(fineEnergy.map { dBFromEnergy($0) }, radius: radius * 3)
             for (i, center) in fineCenterHz.enumerated() {
                 fine.append(
                     SpectrumPoint(id: i, frequency: center, magnitudeDB: fineSmoothed[i])

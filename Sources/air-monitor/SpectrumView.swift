@@ -99,11 +99,16 @@ struct SpectrumView: View {
                     get: { model.rtaSettings.neighborSmoothing },
                     set: { model.rtaSettings.neighborSmoothing = $0 }
                 )) {
-                    Text("Нет — мелкие пики, точные узкие полосы").tag(Int(0))
-                    Text("Соседние ±1").tag(Int(1))
-                    Text("Соседние ±2").tag(Int(2))
-                    Text("Соседние ±3 — ровная кривая").tag(Int(3))
-                    Text("Соседние ±5 — общая картина").tag(Int(5))
+                    Text("Нет — мелкие пики, точные узкие полосы").tag(Float(0))
+                    Text("Лёгкое (0.5)").tag(Float(0.5))
+                    Text("Соседние ±1").tag(Float(1))
+                    Text("±1.5").tag(Float(1.5))
+                    Text("Соседние ±2").tag(Float(2))
+                    Text("±2.5").tag(Float(2.5))
+                    Text("Соседние ±3 — ровная кривая").tag(Float(3))
+                    Text("±4").tag(Float(4))
+                    Text("Соседние ±5 — общая картина").tag(Float(5))
+                    Text("Сильное ±8 — только общий контур").tag(Float(8))
                 }
                 .pickerStyle(.inline)
             } label: {
