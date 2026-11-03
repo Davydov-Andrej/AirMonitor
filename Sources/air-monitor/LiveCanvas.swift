@@ -50,27 +50,54 @@ final class LiveCanvasNSView: NSView {
     /// Вызывается с display-link потока: рендерим в offscreen bitmap и
     /// выставляем layer.contents. Полностью асинхронно — event-loop и активность
     /// окна не влияют на частоту обновления графика.
+    ///
+    /// Троттлинг: 30 Гц вместо 60 — bitmap-конвейер (makeImage + CA-текстура)
+    /// дорог: 60 Гц × 4 графика × ~1 МБ = 240 МБ/с через window server,
+    /// что грузит main на 35% и вызывает пропуски отрисовки.
+    private var lastRenderTime: CFAbsoluteTime = 0
+    private let minFrameInterval: CFAbsoluteTime = 1.0 / 30.0
+    /// Переиспользуемый bitmap-контекст (без аллокации на каждый кадр).
+    private var bitmapCtx: CGContext?
+    private var bitmapSize: (w: Int, h: Int) = (0, 0)
+    private let bitmapLock = NSLock()
+
     func frameTick() {
         stateLock.lock()
         let shouldDraw = window != nil && !isHiddenOrHasHiddenAncestor
         stateLock.unlock()
         guard shouldDraw, let drawer else { return }
 
+        // Троттлинг кадров.
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastRenderTime >= minFrameInterval else { return }
+        lastRenderTime = now
+
         let scale = window?.backingScaleFactor ?? 2
         let w = max(1, Int(bounds.width * scale))
         let h = max(1, Int(bounds.height * scale))
-        guard let ctx = CGContext(
-            data: nil, width: w, height: h,
-            bitsPerComponent: 8, bytesPerRow: w * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return }
+
+        // Переиспользуем контекст, пересоздаём только при изменении размера.
+        bitmapLock.lock()
+        if bitmapCtx == nil || bitmapSize.w != w || bitmapSize.h != h {
+            bitmapCtx = CGContext(
+                data: nil, width: w, height: h,
+                bitsPerComponent: 8, bytesPerRow: w * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+            bitmapSize = (w, h)
+        }
+        let ctx = bitmapCtx
+        bitmapLock.unlock()
+        guard let ctx else { return }
 
         // CGContext битмапа: Y снизу-вверх, как в AppKit. Флип для совместимости.
+        ctx.saveGState()
         ctx.translateBy(x: 0, y: CGFloat(h))
         ctx.scaleBy(x: scale, y: -scale)
 
         drawer(ctx, bounds.size)
+        ctx.restoreGState()
 
         if let image = ctx.makeImage() {
             DispatchQueue.main.async { [weak self] in
