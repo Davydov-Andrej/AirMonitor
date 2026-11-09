@@ -58,6 +58,11 @@ public final class ChannelAnalyzerSet {
         loudness.displaySmoothing = alpha
     }
 
+    /// Калибровочный офсет LUFS (дБ).
+    public func applyCalibration(_ offset: Float) {
+        loudness.calibrationOffset = offset
+    }
+
     /// Применяет новые настройки RTA немедленно (без пересоздания).
     public func applyRTASettings(_ settings: RTASettings) {
         loudness.shortTermSeconds = settings.shortTermSeconds

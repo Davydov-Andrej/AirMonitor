@@ -33,15 +33,32 @@ struct MonitorView: View {
                         get: { model.rtaSettings.loudnessSmoothing },
                         set: { model.rtaSettings.loudnessSmoothing = $0 }
                     )) {
-                        // Значение — «вес нового отсчёта» в EMA:
-                        // 1 = без сглаживания (мгновенно), меньше = плавнее.
-                        Text("Выкл — точные значения").tag(Float(1.0))
+                        // Значение — вес нового отсчёта при СПАДЕ (EMA):
+                        // 1 = спад мгновенный (без сглаживания), 0.1 = длинный плавный хвост.
+                        // Рост всегда мгновенный — пики видны сразу (как в Youlean).
+                        Text("Выкл — спад мгновенный").tag(Float(1.0))
                         Text("Лёгкое (0.7)").tag(Float(0.7))
-                        Text("Умеренное (0.5) — как Youlean").tag(Float(0.5))
-                        Text("Сильное (0.3)").tag(Float(0.3))
-                        Text("Максимальное (0.1)").tag(Float(0.1))
+                        Text("Среднее (0.4)").tag(Float(0.4))
+                        Text("Сильное (0.2)").tag(Float(0.2))
+                        Text("Максимальное (0.1) — как Youlean").tag(Float(0.1))
                     }
                     .pickerStyle(.inline)
+
+                Divider()
+
+                // Калибровка: подгонка под эталонный метр (±дБ).
+                Picker("LUFS-офсет", selection: Binding(
+                    get: { model.lufsOffset },
+                    set: { model.lufsOffset = $0 }
+                )) {
+                    Text("Калибровка: −1 дБ").tag(Float(-1))
+                    Text("Калибровка: −0.5 дБ").tag(Float(-0.5))
+                    Text("Калибровка: 0 (по стандарту)").tag(Float(0))
+                    Text("Калибровка: +0.5 дБ").tag(Float(0.5))
+                    Text("Калибровка: +1 дБ").tag(Float(1))
+                }
+                .pickerStyle(.inline)
+                .help("Если значения устойчиво расходятся с эталонным метром (Youlean и др.), выберите компенсирующий офсет. Сохраняется между запусками.")
                 } label: {
                     Label("Сглаживание: \(smoothingLabel)", systemImage: "circle.lefthalf.filled")
                 }
@@ -77,9 +94,9 @@ struct MonitorView: View {
     private var smoothingLabel: String {
         switch model.rtaSettings.loudnessSmoothing {
         case 0.95...: return "выкл"
-        case 0.6..<0.95: return "лёгкое"
-        case 0.4..<0.6: return "умеренное"
-        case 0.2..<0.4: return "сильное"
+        case 0.55..<0.95: return "лёгкое"
+        case 0.3..<0.55: return "среднее"
+        case 0.15..<0.3: return "сильное"
         default: return "макс."
         }
     }

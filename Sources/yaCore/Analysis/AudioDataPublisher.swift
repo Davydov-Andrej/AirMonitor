@@ -325,6 +325,19 @@ public final class AudioDataPublisher: @unchecked Sendable {
         publish?(app)
     }
 
+    /// Калибровочный офсет LUFS для всех анализаторов.
+    public func applyCalibration(_ offset: Float) {
+        analysisQueue.async { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            let runtimes = Array(self.buses.values)
+            self.lock.unlock()
+            for runtime in runtimes {
+                runtime.applyCalibration(offset)
+            }
+        }
+    }
+
     /// Применяет display smoothing громкости к работающим анализаторам.
     public func applyLoudnessSmoothing(_ alpha: Float) {
         analysisQueue.async { [weak self] in
@@ -392,6 +405,14 @@ public final class BusRuntime: @unchecked Sendable {
             monoAnalyzers: monoAnalyzers,
             stereoAnalyzer: stereoAnalyzer
         )
+    }
+
+    /// Калибровка всех анализаторов шины.
+    public func applyCalibration(_ offset: Float) {
+        monoAnalyzers.values.forEach { $0.applyCalibration(offset) }
+        stereoAnalyzer?.monoAnalyzer.applyCalibration(offset)
+        stereoAnalyzer?.leftAnalyzer.applyCalibration(offset)
+        stereoAnalyzer?.rightAnalyzer.applyCalibration(offset)
     }
 
     /// Применяет display smoothing громкости ко всем анализаторам шины.

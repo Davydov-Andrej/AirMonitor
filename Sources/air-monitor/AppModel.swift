@@ -78,6 +78,14 @@ final class AppModel: ObservableObject {
     /// значение дублируется в nonisolated-хранилище для DSP-потока.
 
 
+    /// Калибровочный офсет LUFS (дБ) — подгонка под эталонный метр.
+    @Published var lufsOffset: Float {
+        didSet {
+            UserDefaults.standard.set(Double(lufsOffset), forKey: "AirMonitor.lufsOffset")
+            publisher?.applyCalibration(lufsOffset)
+        }
+    }
+
     let deviceEngine = MultiDeviceCapture()
     private var publisher: AudioDataPublisher?
     private var deviceListener: AudioDeviceChangeObserver?
@@ -87,6 +95,8 @@ final class AppModel: ObservableObject {
 
     init() {
         showMetricHints = UserDefaults.standard.bool(forKey: "AirMonitor.showMetricHints")
+        let savedOffset = UserDefaults.standard.float(forKey: "AirMonitor.lufsOffset")
+        lufsOffset = savedOffset
 
         loadSettings()
         loadScenes()
@@ -422,6 +432,7 @@ final class AppModel: ObservableObject {
                     self.isCapturing = true
                     self.errorMessage = nil
                     self.syncBusOrder()
+                    publisher.applyCalibration(self.lufsOffset)
                     EngineLog.log("startCapture: шин \(busesToStart.count) (фоновый старт)")
                 }
             }

@@ -77,9 +77,9 @@ public final class LoudnessMeter {
     }
     private var shortTermBlocks: Int = 10
 
-    /// Display smoothing (Youlean-стиль): EMA-вес НОВОГО значения.
-    /// 1.0 = без сглаживания (значение мгновенное), 0.1 = сильное сглаживание.
-    /// Сглаживает momentary/shortTerm и ИСТОРИЮ (график).
+    /// Display smoothing (Youlean-стиль): EMA-вес НОВОГО значения при СПАДЕ.
+    /// 1.0 = без сглаживания (спад мгновенный), 0.1 = длинный плавный хвост.
+    /// Рост всегда мгновенный. Сглаживает momentary/shortTerm и ИСТОРИЮ (график).
     public var displaySmoothing: Float = 1.0 {
         didSet {
             smoothLock.lock()
@@ -88,6 +88,9 @@ public final class LoudnessMeter {
             smoothLock.unlock()
         }
     }
+    /// Калибровочный офсет LUFS (дБ): компенсация расхождения с эталонными метрами.
+    /// Применяется ко всем значениям (M/S/I). Стандартный диапазон -2...+2.
+    public var calibrationOffset: Float = 0.0
     private let smoothLock = NSLock()
     private var smoothM: Float = -Float.infinity
     private var smoothS: Float = -Float.infinity
@@ -140,9 +143,9 @@ public final class LoudnessMeter {
         lock.lock()
         defer { lock.unlock() }
         return Reading(
-            momentaryLUFS: momentary,
-            shortTermLUFS: shortTerm,
-            integratedLUFS: integrated,
+            momentaryLUFS: momentary + calibrationOffset,
+            shortTermLUFS: shortTerm + calibrationOffset,
+            integratedLUFS: integrated + calibrationOffset,
             loudnessRangeLU: loudnessRange,
             truePeakDB: truePeakDB
         )
@@ -180,16 +183,22 @@ public final class LoudnessMeter {
         // Short-term: окно shortTermSeconds (по умолчанию 1 с).
         let rawS = windowLoudness(last: shortTermBlocks)
 
-        // Display smoothing: EMA к новому значению (Youlean-стиль).
-        // При -inf старого или нового — passthrough (иначе заморозка на -inf).
+        // Display smoothing Youlean-стиль: АСИММЕТРИЧНЫЙ EMA.
+        // Рост (громче) — мгновенно: пики сразу видны.
+        // Спад (тише) — плавно с alpha: «хвост» после исчезновения сигнала.
+        // При -inf старого или нового — passthrough.
         smoothLock.lock()
+        let riseAlpha: Float = 1.0  // рост — мгновенно
+        let fallAlpha = displaySmoothing
         if smoothM.isFinite && rawM.isFinite {
-            momentary = smoothM + displaySmoothing * (rawM - smoothM)
+            let a = rawM > smoothM ? riseAlpha : fallAlpha
+            momentary = smoothM + a * (rawM - smoothM)
         } else {
             momentary = rawM
         }
         if smoothS.isFinite && rawS.isFinite {
-            shortTerm = smoothS + displaySmoothing * (rawS - smoothS)
+            let a = rawS > smoothS ? riseAlpha : fallAlpha
+            shortTerm = smoothS + a * (rawS - smoothS)
         } else {
             shortTerm = rawS
         }
