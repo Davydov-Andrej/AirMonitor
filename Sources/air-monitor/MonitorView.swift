@@ -33,11 +33,13 @@ struct MonitorView: View {
                         get: { model.displaySmoothing },
                         set: { model.displaySmoothing = $0 }
                     )) {
-                        Text("Выкл — точные значения").tag(Float(0))
-                        Text("Лёгкое (0.3)").tag(Float(0.3))
+                        // Значение — «вес нового отсчёта» в EMA:
+                        // 1 = без сглаживания (значение мгновенно), 0 = полная заморозка.
+                        Text("Выкл — точные значения").tag(Float(1.0))
+                        Text("Лёгкое (0.7)").tag(Float(0.7))
                         Text("Умеренное (0.5) — как Youlean").tag(Float(0.5))
-                        Text("Сильное (0.7)").tag(Float(0.7))
-                        Text("Максимальное (0.9)").tag(Float(0.9))
+                        Text("Сильное (0.3)").tag(Float(0.3))
+                        Text("Максимальное (0.1)").tag(Float(0.1))
                     }
                     .pickerStyle(.inline)
                 } label: {
@@ -74,10 +76,10 @@ struct MonitorView: View {
 
     private var smoothingLabel: String {
         switch model.displaySmoothing {
-        case ...0.01: return "выкл"
-        case ..<0.45: return "лёгкое"
-        case ..<0.65: return "умеренное"
-        case ..<0.85: return "сильное"
+        case 0.95...: return "выкл"
+        case 0.6..<0.95: return "лёгкое"
+        case 0.4..<0.6: return "умеренное"
+        case 0.2..<0.4: return "сильное"
         default: return "макс."
         }
     }

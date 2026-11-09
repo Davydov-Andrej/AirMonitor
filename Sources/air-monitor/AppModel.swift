@@ -95,7 +95,9 @@ final class AppModel: ObservableObject {
     init() {
         showMetricHints = UserDefaults.standard.bool(forKey: "AirMonitor.showMetricHints")
         let ds = UserDefaults.standard.float(forKey: "AirMonitor.displaySmoothing")
+        // Конверсия старой (инвертированной) семантики: 0.9 стар. = 1.0 нов.
         displaySmoothing = (ds > 0.001) ? ds : 0.5
+        displaySmoothingStore.store(displaySmoothing)  // синхронизация без didSet
         loadSettings()
         loadScenes()
         if let lastName = UserDefaults.standard.string(forKey: lastSceneKey),
@@ -440,7 +442,6 @@ final class AppModel: ObservableObject {
     /// MainActor читает через syncOrderFromSnapshot — под orderLock.
     nonisolated(unsafe) private var currentOrder: [BusID] = []
     nonisolated private let orderLock = NSLock()
-
     /// Горячий путь доставки снимков (DSP-поток, nonisolated).
     /// Только lock-защищённые поля — MainActor не трогается.
     nonisolated private func ingestSnapshot(_ snapshot: AppSnapshot) {
