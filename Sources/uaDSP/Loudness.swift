@@ -183,31 +183,35 @@ public final class LoudnessMeter {
         // Short-term: окно shortTermSeconds (по умолчанию 1 с).
         let rawS = windowLoudness(last: shortTermBlocks)
 
-        // Display smoothing Youlean-стиль: АСИММЕТРИЧНЫЙ EMA.
-        // Рост (громче) — мгновенно: пики сразу видны.
-        // Спад (тише) — плавно с alpha: «хвост» после исчезновения сигнала.
-        // При -inf старого или нового — passthrough.
+        // Сырые значения по стандарту (числа в UI = ровно то, что покажет Youlean).
+        momentary = rawM
+        shortTerm = rawS
+
+        // Display smoothing применяется ТОЛЬКО к графику истории (визуальная
+        // плавность). Числа всегда сырые — иначе расхождение с эталонными метрами.
         smoothLock.lock()
-        let riseAlpha: Float = 1.0  // рост — мгновенно
+        let riseAlpha: Float = 1.0
         let fallAlpha = displaySmoothing
+        let smoothMValue: Float
         if smoothM.isFinite && rawM.isFinite {
             let a = rawM > smoothM ? riseAlpha : fallAlpha
-            momentary = smoothM + a * (rawM - smoothM)
+            smoothMValue = smoothM + a * (rawM - smoothM)
         } else {
-            momentary = rawM
+            smoothMValue = rawM
         }
+        let smoothSValue: Float
         if smoothS.isFinite && rawS.isFinite {
             let a = rawS > smoothS ? riseAlpha : fallAlpha
-            shortTerm = smoothS + a * (rawS - smoothS)
+            smoothSValue = smoothS + a * (rawS - smoothS)
         } else {
-            shortTerm = rawS
+            smoothSValue = rawS
         }
-        smoothM = momentary
-        smoothS = shortTerm
+        smoothM = smoothMValue
+        smoothS = smoothSValue
         smoothLock.unlock()
 
-        // История 10 Гц — из сглаженных значений: график плавный как у Youlean.
-        let hp = HistoryPoint(momentary: momentary, shortTerm: shortTerm, peak: truePeakDB)
+        // История 10 Гц — из СГЛАЖЕННЫХ значений: график плавный как у Youlean.
+        let hp = HistoryPoint(momentary: smoothMValue, shortTerm: smoothSValue, peak: truePeakDB)
         history.append(hp)
         if history.count > historyCapacity {
             history.removeFirst(history.count - historyCapacity)

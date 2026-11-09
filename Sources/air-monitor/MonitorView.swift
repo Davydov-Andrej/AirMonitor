@@ -27,7 +27,7 @@ struct MonitorView: View {
                 } label: {
                     Label("Окно S: \(sWindowLabel)", systemImage: "timer")
                 }
-                // Сглаживание показаний (Youlean-стиль): цифры не мельтешат.
+                // Сглаживание ГРАФИКА громкости (числа всегда точные по стандарту).
                 Menu {
                     Picker("Сглаживание", selection: Binding(
                         get: { model.rtaSettings.loudnessSmoothing },
