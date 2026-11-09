@@ -48,13 +48,14 @@ public final class LoudnessMeter {
     private let sampleRate: Double
     private let kFilter: KWeightingFilter
 
-    /// Подблок 100 мс (единица истории и скользящих окон).
+    /// Подблок 50 мс (единица скользящих окон): короткие пики не размазываются,
+    /// M ловит момент когда burst целиком в окне — как метры с 30 Гц обновлением.
     private let subBlockSize: Int
     private var pending: [Float] = []
 
     /// Средние квадраты подблоков (100 мс каждый) — кольцо.
     private var subMeanSquares: [Float] = []
-    private let subCapacity = 1800  // 3 минуты для integrated/LRA окон
+    private let subCapacity = 3600  // 3 минуты для integrated/LRA окон
 
     /// История 10 Гц.
     public private(set) var history: [HistoryPoint] = []
@@ -72,10 +73,11 @@ public final class LoudnessMeter {
     /// Окно short-term в секундах (стандарт EBU — 3 с; настраивается).
     public var shortTermSeconds: Double = 1.0 {
         didSet {
-            shortTermBlocks = max(1, Int(shortTermSeconds / 0.1))
+            shortTermBlocks = max(1, Int(shortTermSeconds / 0.05))
         }
     }
-    private var shortTermBlocks: Int = 10
+    private var shortTermBlocks: Int = 20
+    private var historyTick = 0
 
     /// Display smoothing (Youlean-стиль): EMA-вес НОВОГО значения при СПАДЕ.
     /// 1.0 = без сглаживания (спад мгновенный), 0.1 = длинный плавный хвост.
@@ -101,7 +103,7 @@ public final class LoudnessMeter {
     public init(sampleRate: Double) {
         self.sampleRate = sampleRate
         self.kFilter = KWeightingFilter(sampleRate: Float(sampleRate))
-        self.subBlockSize = max(1, Int(sampleRate * 0.1))
+        self.subBlockSize = max(1, Int(sampleRate * 0.05))
         self.pending.reserveCapacity(subBlockSize * 2)
         self.subMeanSquares.reserveCapacity(subCapacity)
     }
@@ -180,8 +182,8 @@ public final class LoudnessMeter {
             if peak > truePeakDB { truePeakDB = peak }
         }
 
-        // Momentary: последние 4 подблока (400 мс).
-        let rawM = windowLoudness(last: 4)
+        // Momentary: последние 8 подблоков (400 мс при 50 мс подблоке).
+        let rawM = windowLoudness(last: 8)
 
         // Short-term: окно shortTermSeconds (по умолчанию 1 с).
         let rawS = windowLoudness(last: shortTermBlocks)
@@ -192,14 +194,16 @@ public final class LoudnessMeter {
         // рост M мгновенный, спад плавный; S симметричный.
         smoothLock.lock()
         if numberSmoothing < 0.999 {
+            // alpha задан для 100 мс шага; шаг 50 мс — нормализация
+            let numFall = 1.0 - sqrtf(1.0 - numberSmoothing)
             if smoothM.isFinite && rawM.isFinite {
-                let a = rawM > smoothM ? 1.0 : numberSmoothing
+                let a = rawM > smoothM ? 1.0 : numFall
                 momentary = smoothM + a * (rawM - smoothM)
             } else {
                 momentary = rawM
             }
             if smoothS.isFinite && rawS.isFinite {
-                shortTerm = smoothS + numberSmoothing * (rawS - smoothS)
+                shortTerm = smoothS + numFall * (rawS - smoothS)
             } else {
                 shortTerm = rawS
             }
@@ -217,7 +221,9 @@ public final class LoudnessMeter {
         // Short-term: симметричный EMA (окно и так 1-3 с, и оно само по себе плавное;
         // симметрия даёт ровную линию как у Youlean).
         smoothLock.lock()
-        let fallAlpha = displaySmoothing
+        // alpha задан для 100 мс шага (10 Гц); шаг теперь 50 мс (20 Гц) —
+        // нормализуем, чтобы скорость сглаживания не изменилась:
+        let fallAlpha = 1.0 - sqrtf(1.0 - displaySmoothing)
         let smoothMValue: Float
         if smoothM.isFinite && rawM.isFinite {
             let a = rawM > smoothM ? 1.0 : fallAlpha
@@ -235,11 +241,14 @@ public final class LoudnessMeter {
         smoothS = smoothSValue
         smoothLock.unlock()
 
-        // История 10 Гц — из СГЛАЖЕННЫХ значений: график плавный как у Youlean.
-        let hp = HistoryPoint(momentary: smoothMValue, shortTerm: smoothSValue, peak: truePeakDB)
-        history.append(hp)
-        if history.count > historyCapacity {
-            history.removeFirst(history.count - historyCapacity)
+        // История 10 Гц (каждый 2-й подблок по 50 мс) — из СГЛАЖЕННЫХ значений.
+        historyTick += 1
+        if historyTick % 2 == 0 {
+            let hp = HistoryPoint(momentary: smoothMValue, shortTerm: smoothSValue, peak: truePeakDB)
+            history.append(hp)
+            if history.count > historyCapacity {
+                history.removeFirst(history.count - historyCapacity)
+            }
         }
 
         updateIntegrated()
@@ -295,13 +304,13 @@ public final class LoudnessMeter {
         }
 
         // LRA: 10-й и 95-й перцентили коротких окон (3 с = 30 подблоков).
-        if subMeanSquares.count >= 60 {
+        if subMeanSquares.count >= 120 {
             var shortLevels: [Float] = []
             let step = 5  // каждые 0.5 с
-            var i = 30
+            var i = 60
             while i <= subMeanSquares.count {
-                let slice = subMeanSquares[(i - 30)..<i]
-                let l = -0.691 + 10 * log10(max(slice.reduce(0, +) / 30, 1e-12))
+                let slice = subMeanSquares[(i - 60)..<i]
+                let l = -0.691 + 10 * log10(max(slice.reduce(0, +) / 60, 1e-12))
                 shortLevels.append(l)
                 i += step
             }
