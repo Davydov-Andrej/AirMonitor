@@ -40,7 +40,9 @@ struct MonitorView: View {
                         Text("Лёгкое (0.7)").tag(Float(0.7))
                         Text("Среднее (0.4)").tag(Float(0.4))
                         Text("Сильное (0.2)").tag(Float(0.2))
-                        Text("Максимальное (0.1) — как Youlean").tag(Float(0.1))
+                        Text("Максимальное (0.1)").tag(Float(0.1))
+                        Text("Экстра (0.05)").tag(Float(0.05))
+                        Text("Экстра+ (0.02) — почти прямая").tag(Float(0.02))
                     }
                     .pickerStyle(.inline)
 
@@ -56,6 +58,8 @@ struct MonitorView: View {
                     Text("Плавные (0.4)").tag(Float(0.4))
                     Text("Сильное (0.25)").tag(Float(0.25))
                     Text("Как Youlean (0.15)").tag(Float(0.15))
+                    Text("Очень сильное (0.1)").tag(Float(0.1))
+                    Text("Экстра (0.05)").tag(Float(0.05))
                 }
                 .pickerStyle(.inline)
                 .help("Сглаживание числовых значений M/S. Рост всегда мгновенный (пики видны сразу), спад плавный. Выключите для сверки с эталонными метрами.")
@@ -113,7 +117,8 @@ struct MonitorView: View {
         case 0.55..<0.95: return "лёгкое"
         case 0.3..<0.55: return "среднее"
         case 0.15..<0.3: return "сильное"
-        default: return "макс."
+        case 0.07..<0.15: return "макс."
+        default: return "экстра"
         }
     }
 }

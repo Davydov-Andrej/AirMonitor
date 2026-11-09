@@ -224,9 +224,12 @@ public final class LoudnessMeter {
         // alpha задан для 100 мс шага (10 Гц); шаг теперь 50 мс (20 Гц) —
         // нормализуем, чтобы скорость сглаживания не изменилась:
         let fallAlpha = 1.0 - sqrtf(1.0 - displaySmoothing)
+        // Рост: вдвое быстрее спада, но СГЛАЖЕННЫЙ — «пила» на пиках уходит,
+        // при этом пики всё равно достигаются первыми.
+        let riseAlphaGraph = min(0.9, fallAlpha * 4)
         let smoothMValue: Float
         if smoothM.isFinite && rawM.isFinite {
-            let a = rawM > smoothM ? 1.0 : fallAlpha
+            let a = rawM > smoothM ? riseAlphaGraph : fallAlpha
             smoothMValue = smoothM + a * (rawM - smoothM)
         } else {
             smoothMValue = rawM
