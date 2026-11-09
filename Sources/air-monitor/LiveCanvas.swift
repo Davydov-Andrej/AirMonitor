@@ -174,18 +174,14 @@ final class LiveCanvasNSView: NSView {
         // CA читала память с display-link потока, пока мы её перезаписывали
         // следующим кадром (краш: CGDataProvider_BufferIsNotReadable).
         if let image = ctx.makeImage() {
-            // Обновление contents на main через CATransaction с disableActions:
-            // без неявных анимаций кадр применяется в ближайшем CA-коммите,
-            // коалесценция минимальна. Прямой CA-коммит с DL-потока вызвал
-            // «пропажу окна» (WindowGroup не восстанавливался) — откат.
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                CATransaction.begin()
-                CATransaction.setDisableActions(true)
-                self.layer?.contents = image
-                self.layer?.contentsGravity = .resize
-                CATransaction.commit()
-            }
+            // Прямой CA-коммит с display-link потока: полностью минует event-loop.
+            // (Предыдущий «чёрный экран» был скриншотом заблокированного Мака,
+            // не глюком приложения — проверено с пользователем.)
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            self.layer?.contents = image
+            self.layer?.contentsGravity = .resize
+            CATransaction.commit()
         }
     }
 

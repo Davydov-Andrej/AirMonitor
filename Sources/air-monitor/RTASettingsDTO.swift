@@ -11,6 +11,7 @@ struct RTASettingsDTO: Codable {
     var shortTermSeconds: Double
     var neighborSmoothing: Float
     var loudnessSmoothing: Float
+    var numberSmoothing: Float
     var autoDowngrade: Bool
 
     init(from s: RTASettings) {
@@ -22,6 +23,7 @@ struct RTASettingsDTO: Codable {
         self.shortTermSeconds = s.shortTermSeconds
         self.neighborSmoothing = s.neighborSmoothing
         self.loudnessSmoothing = s.loudnessSmoothing
+        self.numberSmoothing = s.numberSmoothing
         self.autoDowngrade = s.autoDowngrade
     }
 

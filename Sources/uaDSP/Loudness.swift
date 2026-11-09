@@ -88,6 +88,9 @@ public final class LoudnessMeter {
             smoothLock.unlock()
         }
     }
+    /// Сглаживание ЧИСЕЛ (M/S в UI): EMA-вес нового при спаде (рост мгновенный).
+    /// 1.0 = выкл (сырые значения по стандарту); 0.3 = плавные числа для мониторинга.
+    public var numberSmoothing: Float = 1.0
     /// Калибровочный офсет LUFS (дБ): компенсация расхождения с эталонными метрами.
     /// Применяется ко всем значениям (M/S/I). Стандартный диапазон -2...+2.
     public var calibrationOffset: Float = 0.0
@@ -183,26 +186,48 @@ public final class LoudnessMeter {
         // Short-term: окно shortTermSeconds (по умолчанию 1 с).
         let rawS = windowLoudness(last: shortTermBlocks)
 
-        // Сырые значения по стандарту (числа в UI = ровно то, что покажет Youlean).
-        momentary = rawM
-        shortTerm = rawS
+        // Числа: EMA display-сглаживание (опционально, по умолчанию выкл).
+        // С выкл числа сырые по стандарту — совпадают с эталонными метрами.
+        // Включённое сглаживание — для комфортного мониторинга (Youlean-стиль):
+        // рост M мгновенный, спад плавный; S симметричный.
+        smoothLock.lock()
+        if numberSmoothing < 0.999 {
+            if smoothM.isFinite && rawM.isFinite {
+                let a = rawM > smoothM ? 1.0 : numberSmoothing
+                momentary = smoothM + a * (rawM - smoothM)
+            } else {
+                momentary = rawM
+            }
+            if smoothS.isFinite && rawS.isFinite {
+                shortTerm = smoothS + numberSmoothing * (rawS - smoothS)
+            } else {
+                shortTerm = rawS
+            }
+            smoothM = momentary
+            smoothS = shortTerm
+        } else {
+            momentary = rawM
+            shortTerm = rawS
+        }
+        smoothLock.unlock()
 
         // Display smoothing применяется ТОЛЬКО к графику истории (визуальная
         // плавность). Числа всегда сырые — иначе расхождение с эталонными метрами.
+        // Momentary: асимметричный EMA (рост мгновенный — пики видны, спад плавный).
+        // Short-term: симметричный EMA (окно и так 1-3 с, и оно само по себе плавное;
+        // симметрия даёт ровную линию как у Youlean).
         smoothLock.lock()
-        let riseAlpha: Float = 1.0
         let fallAlpha = displaySmoothing
         let smoothMValue: Float
         if smoothM.isFinite && rawM.isFinite {
-            let a = rawM > smoothM ? riseAlpha : fallAlpha
+            let a = rawM > smoothM ? 1.0 : fallAlpha
             smoothMValue = smoothM + a * (rawM - smoothM)
         } else {
             smoothMValue = rawM
         }
         let smoothSValue: Float
         if smoothS.isFinite && rawS.isFinite {
-            let a = rawS > smoothS ? riseAlpha : fallAlpha
-            smoothSValue = smoothS + a * (rawS - smoothS)
+            smoothSValue = smoothS + displaySmoothing * (rawS - smoothS)
         } else {
             smoothSValue = rawS
         }

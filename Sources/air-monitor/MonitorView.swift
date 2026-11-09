@@ -46,6 +46,21 @@ struct MonitorView: View {
 
                 Divider()
 
+                // Сглаживание ЧИСЕЛ M/S (опционально; выкл = сырые значения).
+                Picker("Числа", selection: Binding(
+                    get: { model.rtaSettings.numberSmoothing },
+                    set: { model.rtaSettings.numberSmoothing = $0 }
+                )) {
+                    Text("Выкл — точные значения (для сверки)").tag(Float(1.0))
+                    Text("Лёгкое (0.7)").tag(Float(0.7))
+                    Text("Плавные (0.4)").tag(Float(0.4))
+                    Text("Как Youlean (0.3)").tag(Float(0.3))
+                }
+                .pickerStyle(.inline)
+                .help("Сглаживание числовых значений M/S. Рост всегда мгновенный (пики видны сразу), спад плавный. Выключите для сверки с эталонными метрами.")
+
+                Divider()
+
                 // Калибровка: подгонка под эталонный метр (±дБ).
                 Picker("LUFS-офсет", selection: Binding(
                     get: { model.lufsOffset },

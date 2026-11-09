@@ -58,9 +58,12 @@ public struct RTASettings: Sendable {
     /// Сглаживание кривой по соседним полосам (0 = нет, N = ±N полос).
     /// 0 — мелкие пики узких полос; 3-5 — ровная «общая картина».
     public var neighborSmoothing: Float
-    /// Сглаживание показаний громкости (Youlean-стиль): EMA-вес нового значения.
-    /// 1.0 = без сглаживания; 0.1 = сильное. Влияет на M/S числа и график истории.
+    /// Сглаживание ГРАФИКА громкости (история): EMA-вес нового значения при спаде.
+    /// 1.0 = без сглаживания; 0.1 = сильное. Числа не трогает.
     public var loudnessSmoothing: Float
+    /// Сглаживание ЧИСЕЛ M/S в UI (Youlean-стиль): рост мгновенный, спад плавный.
+    /// 1.0 = выкл (сырые значения); 0.3 = плавные числа.
+    public var numberSmoothing: Float
 
     public init(
         bandsPerOctave: Int = 3,
@@ -71,7 +74,8 @@ public struct RTASettings: Sendable {
         autoDowngrade: Bool = true,
         shortTermSeconds: Double = 1.0,
         neighborSmoothing: Float = 0,
-        loudnessSmoothing: Float = 0.1
+        loudnessSmoothing: Float = 0.1,
+        numberSmoothing: Float = 0.3
     ) {
         self.bandsPerOctave = bandsPerOctave
         self.attack = attack
@@ -82,6 +86,7 @@ public struct RTASettings: Sendable {
         self.shortTermSeconds = shortTermSeconds
         self.neighborSmoothing = neighborSmoothing
         self.loudnessSmoothing = loudnessSmoothing
+        self.numberSmoothing = numberSmoothing
     }
 
     public static let `default` = RTASettings()
@@ -191,10 +196,33 @@ public final class RTASpectrumAnalyzer {
         else if loadEma > 0.8 { target = 1 }  // 1/12 октавы
         else { target = 0 }                   // максимум (1/24)
         if target != downgradeLevel {
-            downgradeLevel = target
-            needsRebuild = true
+            // Гистерезис: уровень должен держаться 2 с (иначе колебания порога
+            // дают пересборку решётки каждые полсекунды = «провалы» кривой,
+            // т.к. энергии полос при пересборке сбрасываются).
+            if target > downgradeLevel {
+                highLoadStreak += 1
+                lowLoadStreak = 0
+                if highLoadStreak >= 60 {  // 60 FFT-кадров ≈ 2 с перегрузки
+                    downgradeLevel = target
+                    needsRebuild = true
+                    highLoadStreak = 0
+                }
+            } else {
+                lowLoadStreak += 1
+                highLoadStreak = 0
+                if lowLoadStreak >= 60 {
+                    downgradeLevel = target
+                    needsRebuild = true
+                    lowLoadStreak = 0
+                }
+            }
+        } else {
+            highLoadStreak = 0
+            lowLoadStreak = 0
         }
     }
+    private var highLoadStreak = 0
+    private var lowLoadStreak = 0
     private var needsRebuild = false
 
     // MARK: - Ядро

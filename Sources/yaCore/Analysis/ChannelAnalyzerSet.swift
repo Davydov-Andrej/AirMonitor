@@ -41,6 +41,7 @@ public final class ChannelAnalyzerSet {
         self.rta = RTASpectrumAnalyzer(length: fftLength, sampleRate: sampleRate, settings: rtaSettings, windowType: windowType)
         self.loudness.shortTermSeconds = rtaSettings.shortTermSeconds
         self.loudness.displaySmoothing = rtaSettings.loudnessSmoothing
+        self.loudness.numberSmoothing = rtaSettings.numberSmoothing
     }
 
     public func process(_ samples: [Float], sampleRate: Float) {
@@ -67,6 +68,7 @@ public final class ChannelAnalyzerSet {
     public func applyRTASettings(_ settings: RTASettings) {
         loudness.shortTermSeconds = settings.shortTermSeconds
         loudness.displaySmoothing = settings.loudnessSmoothing
+        loudness.numberSmoothing = settings.numberSmoothing
         rta.updateSettings(settings)
         lastSpectrumDirty = true
     }
