@@ -75,7 +75,7 @@ public struct RTASettings: Sendable {
         shortTermSeconds: Double = 1.0,
         neighborSmoothing: Float = 0,
         loudnessSmoothing: Float = 0.1,
-        numberSmoothing: Float = 0.3
+        numberSmoothing: Float = 0.2
     ) {
         self.bandsPerOctave = bandsPerOctave
         self.attack = attack

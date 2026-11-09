@@ -206,7 +206,7 @@ enum CGChart {
 
         return { ctx, size, monoHistory, leftHistory, rightHistory in
             let target: Float = -23
-            let windowSeconds: Double = 15
+            let windowSeconds: Double = 30
             let labelAttrs: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 8),
                 .foregroundColor: NSColor.secondaryLabelColor,

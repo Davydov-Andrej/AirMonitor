@@ -54,7 +54,8 @@ struct MonitorView: View {
                     Text("Выкл — точные значения (для сверки)").tag(Float(1.0))
                     Text("Лёгкое (0.7)").tag(Float(0.7))
                     Text("Плавные (0.4)").tag(Float(0.4))
-                    Text("Как Youlean (0.3)").tag(Float(0.3))
+                    Text("Сильное (0.25)").tag(Float(0.25))
+                    Text("Как Youlean (0.15)").tag(Float(0.15))
                 }
                 .pickerStyle(.inline)
                 .help("Сглаживание числовых значений M/S. Рост всегда мгновенный (пики видны сразу), спад плавный. Выключите для сверки с эталонными метрами.")
