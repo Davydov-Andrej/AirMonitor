@@ -27,6 +27,22 @@ struct MonitorView: View {
                 } label: {
                     Label("Окно S: \(sWindowLabel)", systemImage: "timer")
                 }
+                // Сглаживание показаний (Youlean-стиль): цифры не мельтешат.
+                Menu {
+                    Picker("Сглаживание", selection: Binding(
+                        get: { model.displaySmoothing },
+                        set: { model.displaySmoothing = $0 }
+                    )) {
+                        Text("Выкл — точные значения").tag(Float(0))
+                        Text("Лёгкое (0.3)").tag(Float(0.3))
+                        Text("Умеренное (0.5) — как Youlean").tag(Float(0.5))
+                        Text("Сильное (0.7)").tag(Float(0.7))
+                        Text("Максимальное (0.9)").tag(Float(0.9))
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    Label("Сглаживание: \(smoothingLabel)", systemImage: "circle.lefthalf.filled")
+                }
             }
             if model.buses.isEmpty {
                 ContentUnavailableView("Нет шин", systemImage: "waveform", description: Text("Добавьте шину на дашборде и запустите захват"))
@@ -54,6 +70,16 @@ struct MonitorView: View {
     private var sWindowLabel: String {
         let v = model.rtaSettings.shortTermSeconds
         return v.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(v)) : String(format: "%.1f", v)
+    }
+
+    private var smoothingLabel: String {
+        switch model.displaySmoothing {
+        case ...0.01: return "выкл"
+        case ..<0.45: return "лёгкое"
+        case ..<0.65: return "умеренное"
+        case ..<0.85: return "сильное"
+        default: return "макс."
+        }
     }
 }
 

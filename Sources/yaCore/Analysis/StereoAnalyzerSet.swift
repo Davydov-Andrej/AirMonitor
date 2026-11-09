@@ -92,6 +92,13 @@ public final class StereoAnalyzerSet {
     /// Суммарный (stereo) снимок: громкости по энергетическому среднему L/R,
     /// спектр — суммарная энергия полос. Без третьего FFT.
     private static func monoSnapshot(from l: ChannelSnapshot, _ r: ChannelSnapshot) -> ChannelSnapshot {
+        // Громкость по BS.1770: каналы СУММИРУЮТСЯ (без /2!) — иначе -3 дБ
+        // от стандарта. Используется для M/S/I и истории.
+        func lufsSum(_ a: Float, _ b: Float) -> Float {
+            guard a.isFinite, b.isFinite else { return max(a.isFinite ? a : b, b.isFinite ? b : -Float.infinity) }
+            return 10 * log10(powf(10, a / 10) + powf(10, b / 10))
+        }
+        // Спектральные полосы: среднее энергии каналов (сумма удвоила бы уровень полосы).
         func energyAvg(_ a: Float, _ b: Float) -> Float {
             guard a.isFinite, b.isFinite else { return max(a.isFinite ? a : b, b.isFinite ? b : -Float.infinity) }
             return 10 * log10((powf(10, a / 10) + powf(10, b / 10)) / 2)
@@ -128,8 +135,8 @@ public final class StereoAnalyzerSet {
         var history: [LoudnessMeter.HistoryPoint] = []
         for (lh, rh) in zip(l.loudnessHistory, r.loudnessHistory) {
             history.append(LoudnessMeter.HistoryPoint(
-                momentary: energyAvg(lh.momentary, rh.momentary),
-                shortTerm: energyAvg(lh.shortTerm, rh.shortTerm),
+                momentary: lufsSum(lh.momentary, rh.momentary),
+                shortTerm: lufsSum(lh.shortTerm, rh.shortTerm),
                 peak: max(lh.peak, rh.peak)
             ))
         }
@@ -142,13 +149,13 @@ public final class StereoAnalyzerSet {
             vuDB: ampAvg(l.vuDB, r.vuDB),
             truePeakDB: max(l.truePeakDB, r.truePeakDB),
             crestFactorDB: max(l.crestFactorDB, r.crestFactorDB),
-            momentaryLUFS: energyAvg(l.momentaryLUFS, r.momentaryLUFS),
-            shortTermLUFS: energyAvg(l.shortTermLUFS, r.shortTermLUFS),
+            momentaryLUFS: lufsSum(l.momentaryLUFS, r.momentaryLUFS),
+            shortTermLUFS: lufsSum(l.shortTermLUFS, r.shortTermLUFS),
             spectrum: balanceSpectrum,
             rtaBands: bands,
             fineCurve: fine,
             loudnessHistory: history,
-            integratedLUFS: energyAvg(l.integratedLUFS, r.integratedLUFS),
+            integratedLUFS: lufsSum(l.integratedLUFS, r.integratedLUFS),
             loudnessRangeLU: max(l.loudnessRangeLU, r.loudnessRangeLU)
         )
     }

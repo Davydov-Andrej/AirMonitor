@@ -24,7 +24,7 @@ public final class ChannelAnalyzerSet {
         self.label = "Ch \(channelIndex + 1)"
         self.sampleRate = sampleRate
         self.vu = VUMeter(sampleRate: sampleRate)
-        self.dynamics = DynamicsAnalyzer()
+        self.dynamics = DynamicsAnalyzer(sampleRate: sampleRate)
         self.loudness = LoudnessMeter(sampleRate: Double(sampleRate))
         self.rta = RTASpectrumAnalyzer(length: fftLength, sampleRate: sampleRate, windowType: windowType)
         self.loudness.shortTermSeconds = 1.0
@@ -35,7 +35,7 @@ public final class ChannelAnalyzerSet {
         self.label = label
         self.sampleRate = sampleRate
         self.vu = VUMeter(sampleRate: sampleRate)
-        self.dynamics = DynamicsAnalyzer()
+        self.dynamics = DynamicsAnalyzer(sampleRate: sampleRate)
         self.loudness = LoudnessMeter(sampleRate: Double(sampleRate))
         self.rta = RTASpectrumAnalyzer(length: fftLength, sampleRate: sampleRate, settings: rtaSettings, windowType: windowType)
         self.loudness.shortTermSeconds = rtaSettings.shortTermSeconds

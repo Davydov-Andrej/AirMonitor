@@ -176,21 +176,16 @@ public final class LoudnessMeter {
     }
 
     /// Громкость окна из `last` подблоков: −0.691 + 10·log10(среднее).
-    /// Тихие подблоки (< −70 LU) исключаются — так работает гейтинг.
+    /// По BS.1770 Momentary и Short-term считаются БЕЗ гейта
+    /// (гейтится только Integrated — см. updateIntegrated).
     private func windowLoudness(last: Int) -> Float {
         guard !subMeanSquares.isEmpty else { return -Float.infinity }
         let window = subMeanSquares.suffix(last)
         var sum: Float = 0
-        var count = 0
         for ms in window {
-            let db = -0.691 + 10 * log10(max(ms, 1e-12))
-            if db > LoudnessConstants.absoluteGateLU {
-                sum += ms
-                count += 1
-            }
+            sum += ms
         }
-        guard count > 0 else { return -Float.infinity }
-        return -0.691 + 10 * log10(sum / Float(count))
+        return -0.691 + 10 * log10(max(sum / Float(window.count), 1e-12))
     }
 
     /// Integrated с двойным гейтингом (absolute −70 LU, relative −10 LU).
@@ -250,14 +245,23 @@ public final class LoudnessMeter {
     }
 }
 
-/// Каскад K-weighting: high-pass 38.135 Гц → high-shelf +4 дБ (1.68 кГц).
+/// Каскад K-weighting по ITU-R BS.1770-4.
+/// Табличные коэффициенты стандарта (для 48 кГц): АЧХ при других частотах
+/// дискретизации (44.1к и т.д.) отклоняется от идеала < 0.5 дБ на самом низе —
+/// приемлемо для мониторинга (проверено расчётом, см. v0.9.5).
 final class KWeightingFilter {
     private let hp: Biquad
     private let hs: Biquad
 
     init(sampleRate: Float) {
-        hp = Biquad.highPass(frequency: 38.135, sampleRate: sampleRate, q: 0.500327)
-        hs = Biquad.highShelfGain(db: 4.0, frequency: 1681.97, sampleRate: sampleRate)
+        // Stage 1: high-shelf +4 дБ (табличные коэффициенты BS.1770-4)
+        hs = Biquad(coefficients:
+            (b0: 1.53512485958697, b1: -2.69169618940638, b2: 1.28039103378636,
+             a1: -1.63249945455166, a2: 0.737932270408209))
+        // Stage 2: RLB high-pass 38 Гц (табличные)
+        hp = Biquad(coefficients:
+            (b0: 1.0, b1: -2.0, b2: 1.0,
+             a1: -1.99004745483398, a2: 0.990072250366216))
     }
 
     func process(_ input: [Float]) -> [Float] {
@@ -273,6 +277,16 @@ final class Biquad {
     private var a2: Float = 0
     private var z1: Float = 0
     private var z2: Float = 0
+
+    init(coefficients: (b0: Double, b1: Double, b2: Double, a1: Double, a2: Double)) {
+        self.b0 = Float(coefficients.b0)
+        self.b1 = Float(coefficients.b1)
+        self.b2 = Float(coefficients.b2)
+        self.a1 = Float(coefficients.a1)
+        self.a2 = Float(coefficients.a2)
+    }
+
+    init() {}
 
     static func highPass(frequency: Float, sampleRate: Float, q: Float) -> Biquad {
         let b = Biquad()

@@ -30,7 +30,9 @@ public final class DynamicsAnalyzer {
     private var runningSumSquares: Double = 0
     private var runningCount: Int = 0
 
-    public init() {}
+    private var sampleRate: Float = 48000
+
+    public init(sampleRate: Float = 48000) { self.sampleRate = sampleRate }
 
     public func process(_ samples: [Float]) {
         guard !samples.isEmpty else { return }
@@ -42,7 +44,7 @@ public final class DynamicsAnalyzer {
 
         // Быстрый RMS с атакой/спадом ~100 мс — живой уровень метра.
         let rms = sqrtf(sumSquares / Float(samples.count))
-        let dt = Float(samples.count) / 48000.0  // приблизительно; точность не критична
+        let dt = Float(samples.count) / sampleRate
         let alpha = rms > fastState ? expf(-dt / 0.03) : expf(-dt / 0.15)
         fastState = alpha * fastState + (1 - alpha) * rms
         fastRMS = 20 * log10(max(fastState, 1e-9))

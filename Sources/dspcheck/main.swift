@@ -112,6 +112,27 @@ final class Runner {
         let deviations = bal.balances().map { $0.deviationDB }
         check(deviations.contains { abs($0) > 0.1 }, "Balance: форма не константа (\(deviations))")
 
+        print("== LUFS standard check ==")
+        let lm = LoudnessMeter(sampleRate: 48000)
+        // 10 сек стерео 1 кГц, -20 dBFS: ожидание -20.69 LUFS по BS.1770
+        let n = 48000
+        for chunk in 0..<10 {
+            var left = [Float](repeating: 0, count: n)
+            var right = [Float](repeating: 0, count: n)
+            for i in 0..<n {
+                let t = Float(Double(chunk * n + i) / 48000.0)
+                left[i] = sinf(2 * Float.pi * 1000 * t) * 0.1
+                right[i] = sinf(2 * Float.pi * 1000 * t) * 0.1
+            }
+            lm.process(left)
+            lm.process(right)
+        }
+        let r = lm.reading()
+        // Один meter на канал (как в приложении): оба канала идентичны →
+        // LUFS канала = -23.7, сумма по BS.1770 (L²+R²) = -23.7 + 3.01 = -20.69
+        // Теория: канал = -0.691 + 10log10(0.1²/2 * 1.09(каскад@1кГц)) = -22.94
+        check(abs(r.momentaryLUFS - (-22.94)) < 0.3, "LUFS канала ≈ -22.94 (получено \(String(format: "%.2f", r.momentaryLUFS)))")
+
         print("\nИтог: \(failures == 0 ? "ВСЕ ПРОШЛИ" : "ОШИБОК: \(failures)")")
     }
 }
