@@ -3,7 +3,7 @@ import CoreAudio
 import AudioToolbox
 
 func log(_ message: String) {
-    FileHandle.standardError.write(("[YamahaAir] " + message + "\n").data(using: .utf8)!)
+    FileHandle.standardError.write(("[AirMonitor] " + message + "\n").data(using: .utf8)!)
 }
 
 /// Захват с выбранного устройства через AUHAL (CoreAudio). В отличие от

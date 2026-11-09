@@ -4,8 +4,8 @@ import yaCore
 
 // CLI-утилита: проверка мультиустройств.
 //   air-aio --list
-//   air-aio "Yamaha TF" ch 0 1 2      — захват указанных каналов с устройства
-//   air-aio "Yamaha TF" L 0 R 1       — стерео-пара (0=L, 1=R)
+//   air-aio "Имя устройства" ch 0 1 2  — захват указанных каналов с устройства
+//   air-aio "Имя устройства" L 0 R 1   — стерео-пара (0=L, 1=R)
 //   air-aio "DevA" 0 1 + "DevB" 0 1   — одновременный захват двух устройств
 
 final class RealtimeCounter: @unchecked Sendable {
@@ -104,7 +104,7 @@ func parseGroup(_ tokens: [String]) -> DeviceRequest? {
 let requests = deviceGroups.compactMap(parseGroup)
 guard requests.count == deviceGroups.count else {
     stderr("Не удалось распарсить аргументы")
-    stderr("Примеры: air-aio \"Yamaha TF\" ch 0 1  ·  air-aio \"Yamaha TF\" L 0 R 1  ·  air-aio \"DevA\" L 0 R 1 + \"DevB\" ch 0 1")
+    stderr("Примеры: air-aio \"Мой микшер\" ch 0 1  ·  air-aio \"Мой микшер\" L 0 R 1  ·  air-aio \"DevA\" L 0 R 1 + \"DevB\" ch 0 1")
     exit(1)
 }
 

@@ -3,7 +3,7 @@ import CoreAudio
 import AudioToolbox
 
 /// Подписка на набор каналов устройства. Индексы — физические каналы USB
-/// (0-based), например для Yamaha TF: 0..<16.
+/// (0-based), например для внешнего USB-микшера: 0..<16.
 public struct ChannelSubscription: Hashable {
     public let deviceID: AudioDeviceID
     public let channelIndexes: [Int]
