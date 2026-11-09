@@ -195,15 +195,17 @@ public final class LoudnessMeter {
         smoothLock.lock()
         if numberSmoothing < 0.999 {
             // alpha задан для 100 мс шага; шаг 50 мс — нормализация
-            let numFall = 1.0 - sqrtf(1.0 - numberSmoothing)
+            let numAlpha = 1.0 - sqrtf(1.0 - numberSmoothing)
+            // СИММЕТРИЧНЫЙ EMA на числах (как дисплей Youlean): плавно в обе стороны.
+            // Пики видны с задержкой ~200-300 мс — цена плавных чисел; точные пики
+            // смотрятся на TruePeak и графике.
             if smoothM.isFinite && rawM.isFinite {
-                let a = rawM > smoothM ? 1.0 : numFall
-                momentary = smoothM + a * (rawM - smoothM)
+                momentary = smoothM + numAlpha * (rawM - smoothM)
             } else {
                 momentary = rawM
             }
             if smoothS.isFinite && rawS.isFinite {
-                shortTerm = smoothS + numFall * (rawS - smoothS)
+                shortTerm = smoothS + numAlpha * (rawS - smoothS)
             } else {
                 shortTerm = rawS
             }
