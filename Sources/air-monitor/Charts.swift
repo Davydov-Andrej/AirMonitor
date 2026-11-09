@@ -15,10 +15,35 @@ struct LoudnessHistoryChart: View {
         LiveCanvas(
             makeDrawer: { [holder, isStereo] in CGChart.loudnessDrawer(holder: holder, isStereo: isStereo) },
             makeBackground: { CGChart.loudnessBackground() },
-            dataVersion: { [holder] in holder.dataVersion }
+            dataVersion: { [holder] in holder.dataVersion },
+            hoverText: { point in
+                // Текст показывает drawer — здесь пусто (drawer рисует сам)
+                ""
+            }
         )
         .background(Color.black.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(alignment: .topLeading) {
+            // Легенда: цвета линий
+            HStack(spacing: 8) {
+                if isStereo {
+                    legendDot(.blue, "Стерео")
+                    legendDot(.red, "L")
+                    legendDot(.blue, "R")
+                } else {
+                    legendDot(.blue, "M")
+                }
+                legendDot(.green, "цель −23")
+            }
+            .padding(4)
+        }
+    }
+
+    private func legendDot(_ color: Color, _ label: String) -> some View {
+        HStack(spacing: 3) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(label).font(.system(size: 8)).foregroundStyle(.secondary)
+        }
     }
 }
 
@@ -32,10 +57,26 @@ struct SpectrumCurveChart: View {
         LiveCanvas(
             makeDrawer: { [holder] in CGChart.spectrumDrawer(holder: holder) },
             makeBackground: { CGChart.spectrumBackground() },
-            dataVersion: { [holder] in holder.dataVersion }
+            dataVersion: { [holder] in holder.dataVersion },
+            hoverText: { _ in "" }
         )
         .background(Color.black.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(alignment: .topLeading) {
+            HStack(spacing: 8) {
+                legendLine(.accentColor, "кривая 1/24 окт")
+                legendLine(.accentColor.opacity(0.2), "октавные полосы")
+                legendLine(.primary.opacity(0.4), "пик-холд")
+            }
+            .padding(4)
+        }
+    }
+
+    private func legendLine(_ color: Color, _ label: String) -> some View {
+        HStack(spacing: 3) {
+            RoundedRectangle(cornerRadius: 1).fill(color).frame(width: 10, height: 3)
+            Text(label).font(.system(size: 8)).foregroundStyle(.secondary)
+        }
     }
 }
 

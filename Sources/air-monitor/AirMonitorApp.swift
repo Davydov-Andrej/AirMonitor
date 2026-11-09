@@ -8,7 +8,7 @@ struct AirMonitorApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(appModel)
-                .frame(minWidth: 1280, minHeight: 800)
+                .frame(minWidth: 900, minHeight: 560)
         }
     }
 }

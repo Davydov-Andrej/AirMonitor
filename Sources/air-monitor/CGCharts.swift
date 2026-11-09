@@ -93,13 +93,23 @@ enum CGChart {
         }
     }
 
-    static func spectrumDrawer(holder: BusSnapshotHolder) -> (CGContext, CGSize) -> Void {
+    static func spectrumDrawer(holder: BusSnapshotHolder) -> (CGContext, CGSize, CGPoint?, String) -> Void {
         // Данные резолвятся КАЖДЫЙ кадр: holder живой, snapshot обновляется DSP-потоком.
         let drawer = spectrumDrawerBuilder()
-        return { ctx, size in
+        return { ctx, size, hover, _ in
             let snapshot = holder.snapshot
             let channel = snapshot?.mono ?? snapshot?.channels.first
             drawer(ctx, size, channel?.fineCurve ?? [], channel?.rtaBands ?? [])
+            if let hover {
+                let pts = channel?.fineCurve ?? []
+                let logMin = log10f(20), logMax = log10f(20000)
+                let t = Float(hover.x / size.width)
+                let freq = powf(10, logMin + t * (logMax - logMin))
+                if let nearest = pts.min(by: { abs($0.frequency - freq) < abs($1.frequency - freq) }) {
+                    drawHoverBadge(ctx: ctx, size: size, at: hover,
+                                   text: String(format: "%.0f Гц: %.1f дБ", nearest.frequency, nearest.magnitudeDB))
+                }
+            }
         }
     }
 
@@ -155,16 +165,56 @@ enum CGChart {
 
     // MARK: - Громкость (история)
 
-    static func loudnessDrawer(holder: BusSnapshotHolder, isStereo: Bool) -> (CGContext, CGSize) -> Void {
+    static func loudnessDrawer(holder: BusSnapshotHolder, isStereo: Bool) -> (CGContext, CGSize, CGPoint?, String) -> Void {
         let inner = loudnessDrawerBuilder()
-        return { ctx, size in
+        return { ctx, size, hover, _ in
             let snapshot = holder.snapshot
             let mono = isStereo ? (snapshot?.mono ?? snapshot?.channels.first) : snapshot?.channels.first
+            let history = mono?.loudnessHistory ?? []
             inner(ctx, size,
-                  mono?.loudnessHistory ?? [],
+                  history,
                   isStereo ? snapshot?.channels.first?.loudnessHistory ?? [] : [],
                   isStereo ? snapshot?.channels.dropFirst().first?.loudnessHistory ?? [] : [])
+            if let hover, !history.isEmpty {
+                let capacity = 300  // 30 с × 10 Гц
+                let idx = Int((hover.x / size.width) * CGFloat(capacity))
+                if idx >= 0, idx < history.count {
+                    let p = history[idx]
+                    let text = p.momentary.isFinite
+                        ? String(format: "M %.1f  S %.1f LUFS", p.momentary, p.shortTerm)
+                        : "нет сигнала"
+                    drawHoverBadge(ctx: ctx, size: size, at: hover, text: text)
+                }
+            }
         }
+    }
+
+    /// Плашка hover-подсказки (координаты drawer'а — флипнутые SwiftUI-стилю).
+    static func drawHoverBadge(ctx: CGContext, size: CGSize, at point: CGPoint, text: String) {
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .medium),
+            .foregroundColor: NSColor.labelColor,
+        ]
+        let str = NSAttributedString(string: "  " + text + "  ", attributes: attrs)
+        let textSize = str.boundingRect(with: size, options: [.usesLineFragmentOrigin]).size
+        var x = point.x + 12
+        var y = point.y + 10
+        if x + textSize.width > size.width { x = size.width - textSize.width - 2 }
+        if y + textSize.height > size.height { y = point.y - textSize.height - 6 }
+        let rect = CGRect(x: x, y: size.height - y - textSize.height, width: textSize.width, height: textSize.height)
+        ctx.saveGState()
+        ctx.setFillColor(NSColor.windowBackgroundColor.withAlphaComponent(0.88).cgColor)
+        ctx.fill(rect)
+        ctx.setStrokeColor(NSColor.separatorColor.cgColor)
+        ctx.setLineWidth(0.5)
+        ctx.addPath(CGPath(rect: rect, transform: nil))
+        ctx.strokePath()
+        ctx.restoreGState()
+        ctx.saveGState()
+        ctx.translateBy(x: 0, y: size.height)
+        ctx.scaleBy(x: 1, y: -1)
+        str.draw(at: CGPoint(x: rect.minX, y: size.height - rect.maxY))
+        ctx.restoreGState()
     }
 
     static func loudnessDrawerBuilder() -> (CGContext, CGSize, [LoudnessMeter.HistoryPoint], [LoudnessMeter.HistoryPoint], [LoudnessMeter.HistoryPoint]) -> Void {
@@ -262,12 +312,25 @@ enum CGChart {
 
     // MARK: - Тональный баланс
 
-    static func balanceDrawer(holder: BusSnapshotHolder) -> (CGContext, CGSize) -> Void {
+    static func balanceDrawer(holder: BusSnapshotHolder) -> (CGContext, CGSize, CGPoint?, String) -> Void {
         let inner = balanceDrawerBuilder()
-        return { ctx, size in
+        return { ctx, size, hover, _ in
             let snapshot = holder.snapshot
             let channel = snapshot?.mono ?? snapshot?.channels.first
             inner(ctx, size, channel?.tonalBalances ?? [], channel?.tonalBalances.isEmpty == false)
+            if let hover {
+                let balances = channel?.tonalBalances ?? []
+                if !balances.isEmpty {
+                    let slot = size.width / CGFloat(balances.count)
+                    let idx = Int(hover.x / slot)
+                    if idx >= 0, idx < balances.count {
+                        let b = balances[idx]
+                        drawHoverBadge(ctx: ctx, size: size, at: hover,
+                                       text: String(format: "%s: %+.1f дБ (реф. %.0f дБ)",
+                                                    b.band.localizedName, b.deviationDB, b.energyDB))
+                    }
+                }
+            }
         }
     }
 

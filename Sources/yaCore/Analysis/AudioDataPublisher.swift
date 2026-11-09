@@ -200,10 +200,60 @@ public final class AudioDataPublisher: @unchecked Sendable {
         timer.schedule(deadline: .now(), repeating: interval, leeway: .milliseconds(2))
         timer.setEventHandler { [weak self] in
             self?.maybePublish()
+            self?.watchdogTick()
         }
         timer.resume()
         publishTimer = timer
     }
+
+    /// Watchdog: если шины есть и захват должен идти, но публикации молчат дольше
+    /// 3 с (устройство «отвалилось» тихо, без HAL-ошибки) — перезапускаем захват.
+    private var lastFrameTime: CFAbsoluteTime = CFAbsoluteTimeGetCurrent()
+    private var watchdogRestarting = false
+
+    private func watchdogTick() {
+        let now = CFAbsoluteTimeGetCurrent()
+        if frameReceivedRecently {
+            lastFrameTime = now
+            return
+        }
+        guard now - lastFrameTime > 3.0, !watchdogRestarting else { return }
+        watchdogRestarting = true
+        EngineLog.log("[watchdog] кадры молчат > 3 с — перезапуск захвата устройств")
+
+        self.lock.lock()
+        let devices = Array(Set(self.buses.values.map { $0.deviceID }))
+        let rates = self.deviceRates
+        self.lock.unlock()
+
+        for deviceID in devices {
+            let rate = rates[deviceID] ?? 48000
+            _ = self.deviceEngine.restartCapture(deviceID: deviceID)
+            _ = rate
+            // Переподписка на device: setDestination снова
+            let wanted = self.wantedForDevice(deviceID)
+            self.deviceEngine.updateWantedChannels(deviceID: deviceID, channels: wanted)
+            self.deviceEngine.setDestination(deviceID: deviceID) { [weak self] frame in
+                self?.ingest(frame: frame, from: deviceID)
+            }
+        }
+        lastFrameTime = CFAbsoluteTimeGetCurrent()
+        watchdogRestarting = false
+        EngineLog.log("[watchdog] перезапуск завершён")
+    }
+
+    private func wantedForDevice(_ deviceID: AudioDeviceID) -> Set<Int> {
+        lock.lock()
+        defer { lock.unlock() }
+        var wanted: Set<Int> = []
+        for runtime in buses.values where runtime.deviceID == deviceID {
+            for ch in runtime.config.mode.channelIndexes { wanted.insert(ch) }
+        }
+        return wanted
+    }
+
+    /// Флаг «кадры приходят»: ставится в ingest.
+    private var frameReceivedRecently = true
 
     private func stopPublishTimer() {
         publishTimer?.cancel()
@@ -253,6 +303,7 @@ public final class AudioDataPublisher: @unchecked Sendable {
     }
 
     private func ingest(frame: Frame, from deviceID: AudioDeviceID) {
+        frameReceivedRecently = true
         // Вся обработка — на одной serial-очереди: стабильный темп, без гонок.
         analysisQueue.async { [weak self] in
             guard let self else { return }

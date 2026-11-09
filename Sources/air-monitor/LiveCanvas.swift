@@ -10,19 +10,24 @@ import yaCore
 final class LiveCanvasNSView: NSView {
     /// Замыкание отрисовки: пишется с main (updateNSView), читается на
     /// display-link потоке — под локом (замыкание — не атомарный тип).
-    private var drawerStorage: ((CGContext, CGSize) -> Void)?
+    private var drawerStorage: ((CGContext, CGSize, CGPoint?, String) -> Void)?
 
-    var drawer: ((CGContext, CGSize) -> Void)? {
-        get {
-            drawerLock.lock()
-            defer { drawerLock.unlock() }
-            return drawerStorage
-        }
-        set {
-            drawerLock.lock()
-            drawerStorage = newValue
-            drawerLock.unlock()
-        }
+    /// Отрисовка динамики: ctx, размер, позиция мыши (или nil), текст hover-подсказки.
+    var drawer: ((CGContext, CGSize, CGPoint?, String) -> Void)?
+
+    // Hover-состояние: пишется с main (mouseMoved), читается с DL-потока — под локом.
+    private var hoverStorage: CGPoint?
+    private let hoverLock = NSLock()
+    var hoverPointSafe: CGPoint? {
+        get { hoverLock.lock(); defer { hoverLock.unlock() }; return hoverStorage }
+        set { hoverLock.lock(); hoverStorage = newValue; hoverLock.unlock() }
+    }
+    /// Провайдер текста подсказки (main-поток задаёт, DL-поток вызывает под локом).
+    private var hoverTextStorage: ((CGPoint) -> String)?
+    private let hoverTextLock = NSLock()
+    var hoverTextProviderSafe: ((CGPoint) -> String)? {
+        get { hoverTextLock.lock(); defer { hoverTextLock.unlock() }; return hoverTextStorage }
+        set { hoverTextLock.lock(); hoverTextStorage = newValue; hoverTextLock.unlock() }
     }
     private let drawerLock = NSLock()
     nonisolated(unsafe) private var displayLink: CVDisplayLink?
@@ -166,7 +171,7 @@ final class LiveCanvasNSView: NSView {
         ctx.translateBy(x: 0, y: CGFloat(h))
         ctx.scaleBy(x: scale, y: -scale)
 
-        drawer(ctx, bounds.size)
+        drawer(ctx, bounds.size, hoverPointSafe, hoverPointSafe.flatMap { hoverTextProviderSafe?( $0 ) } ?? "")
         ctx.restoreGState()
 
         // ВАЖНО: makeImage() копирует буфер — это обязательная цена безопасности.
@@ -183,6 +188,34 @@ final class LiveCanvasNSView: NSView {
             self.layer?.contentsGravity = .resize
             CATransaction.commit()
         }
+    }
+
+    // MARK: - Hover (позиция мыши внутри вью)
+
+    override func mouseMoved(with event: NSEvent) {
+        hoverPointSafe = convert(event.locationInWindow, from: nil)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        mouseMoved(with: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoverPointSafe = nil
+    }
+
+    // mouseMoved-события включаются через tracking area (activeInKeyWindow)
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas where area.options.contains(.mouseMoved) {
+            removeTrackingArea(area)
+        }
+        addTrackingArea(NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        ))
     }
 
     deinit {
@@ -206,17 +239,21 @@ private final class DisplayLinkProxy: NSObject {
 /// `makeDrawer` должен захватывать ЖИВЫЕ источники данных (holder), а не снимки:
 /// замыкание создаётся один раз, и drawer сам читает свежие данные каждый кадр.
 struct LiveCanvas: NSViewRepresentable {
-    let makeDrawer: () -> (CGContext, CGSize) -> Void
+    let makeDrawer: () -> (CGContext, CGSize, CGPoint?, String) -> Void
     var makeBackground: (() -> (CGContext, CGSize) -> Void)?
     /// Источник версии данных: nil = рисовать каждый кадр.
     var dataVersion: (() -> Int)?
+    /// Текст hover-подсказки для точки (в координатах вью). nil = нет подсказки.
+    var hoverText: ((_ localPoint: CGPoint) -> String)?
 
-    init(makeDrawer: @escaping () -> (CGContext, CGSize) -> Void,
+    init(makeDrawer: @escaping () -> (CGContext, CGSize, CGPoint?, String) -> Void,
          makeBackground: (() -> (CGContext, CGSize) -> Void)? = nil,
-         dataVersion: (() -> Int)? = nil) {
+         dataVersion: (() -> Int)? = nil,
+         hoverText: ((_ localPoint: CGPoint) -> String)? = nil) {
         self.makeDrawer = makeDrawer
         self.makeBackground = makeBackground
         self.dataVersion = dataVersion
+        self.hoverText = hoverText
     }
 
     func makeNSView(context: Context) -> LiveCanvasNSView {
@@ -224,12 +261,13 @@ struct LiveCanvas: NSViewRepresentable {
         v.drawer = makeDrawer()
         v.backgroundRenderer = makeBackground?()
         v.versionProvider = dataVersion
+        v.hoverTextProviderSafe = hoverText
         return v
     }
 
     func updateNSView(_ nsView: LiveCanvasNSView, context: Context) {
         nsView.drawer = makeDrawer()
-        nsView.needsDisplay = true
+        nsView.hoverTextProviderSafe = hoverText
     }
 }
 
