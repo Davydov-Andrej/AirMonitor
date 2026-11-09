@@ -15,6 +15,13 @@ final class LiveCanvasNSView: NSView {
     /// Отрисовка динамики: ctx, размер, позиция мыши (или nil), текст hover-подсказки.
     var drawer: ((CGContext, CGSize, CGPoint?, String) -> Void)?
 
+    // Контекст для CGChart.drawText (DL-поток ставит, CoreText читает).
+    private func setCurrentDrawContext(_ ctx: CGContext?) {
+        currentDrawContextLock.lock()
+        currentDrawContext = ctx
+        currentDrawContextLock.unlock()
+    }
+
     // Hover-состояние: пишется с main (mouseMoved), читается с DL-потока — под локом.
     // ВАЖНО: замыкание-провайдер текста — MainActor-isolated (создаётся в View.body),
     // поэтому ВЫЗЫВАЕТСЯ ТОЛЬКО на main (в mouseMoved). DL-поток читает ГОТОВЫЙ текст
@@ -195,7 +202,10 @@ final class LiveCanvasNSView: NSView {
 
         let cachedText = cachedHoverText()
         let cachedPoint = hoverPointSafe
+        // Текст рисуется CoreText-ом через этот контекст (CGChart.drawText).
+        setCurrentDrawContext(ctx)
         drawer(ctx, bounds.size, cachedPoint, cachedText)
+        setCurrentDrawContext(nil)
         ctx.restoreGState()
 
         // ВАЖНО: makeImage() копирует буфер — это обязательная цена безопасности.

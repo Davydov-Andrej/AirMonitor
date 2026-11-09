@@ -6,6 +6,10 @@ import yaCore
 /// Отрисовщики графиков на CGContext (вне SwiftUI-обновлений).
 /// Вызываются из CADisplayLink (LiveCanvas) — каждые ~16 мс, независимо от
 /// активности окна. Данные захватываются при создании drawer'а.
+/// Контекст битмапа, в котором идёт отрисовка текста (ставится в frameTick на DL-потоке).
+nonisolated(unsafe) var currentDrawContext: CGContext?
+nonisolated(unsafe) let currentDrawContextLock = NSLock()
+
 enum CGChart {
 
     // MARK: - Спектр (АЧХ)
@@ -58,6 +62,13 @@ enum CGChart {
         return { ctx, size in
             drawGrid(ctx: ctx, size: size, dbLabels: dbLabels, freqLabels: freqLabels,
                      xPos: xPos, yPos: yPos)
+            // Подпись оси дБ
+            let unitAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 7),
+                .foregroundColor: NSColor.tertiaryLabelColor,
+            ]
+            drawText(NSAttributedString(string: "дБFS", attributes: unitAttrs),
+                     at: CGPoint(x: 4, y: 2), height: size.height)
         }
     }
 
@@ -81,15 +92,30 @@ enum CGChart {
                 path.move(to: CGPoint(x: 0, y: y))
                 path.addLine(to: CGPoint(x: size.width, y: y))
                 stroke(ctx, path, color: .gray, width: 0.5, alpha: 0.15)
-                drawText(NSAttributedString(string: "\(Int(lu))", attributes: labelAttrs),
+                drawText(NSAttributedString(string: "\(Int(lu)) LU", attributes: labelAttrs),
                          at: CGPoint(x: 3, y: y + 1), height: size.height)
                 lu += 10
+            }
+            // Горизонтальные подписи: время (окно 30 с, справа «сейчас»)
+            let windowSeconds = 30.0
+            let timeLabels: [(Double, String)] = [(5, "−5 с"), (10, "−10 с"), (15, "−15 с"), (20, "−20 с"), (25, "−25 с"), (29.5, "сейчас")]
+            for (sec, label) in timeLabels {
+                let x = size.width * CGFloat((windowSeconds - sec) / windowSeconds)
+                var tick = CGMutablePath()
+                tick.move(to: CGPoint(x: x, y: 0))
+                tick.addLine(to: CGPoint(x: x, y: size.height))
+                stroke(ctx, tick, color: .gray, width: 0.5, alpha: 0.1)
+                drawText(NSAttributedString(string: label, attributes: labelAttrs),
+                         at: CGPoint(x: x - 18, y: size.height - 12), height: size.height)
             }
             let ty = yPos(target, height: size.height)
             let targetPath = CGMutablePath()
             targetPath.move(to: CGPoint(x: 0, y: ty))
             targetPath.addLine(to: CGPoint(x: size.width, y: ty))
             stroke(ctx, targetPath, color: .systemGreen, width: 1, alpha: 0.45, dash: [4, 3])
+            // Легенда целевой линии
+            drawText(NSAttributedString(string: "цель −23 LUFS (EBU R128)", attributes: labelAttrs),
+                     at: CGPoint(x: size.width - 130, y: ty + 2), height: size.height)
         }
     }
 
@@ -210,10 +236,13 @@ enum CGChart {
         ctx.addPath(CGPath(rect: rect, transform: nil))
         ctx.strokePath()
         ctx.restoreGState()
+        // Текст через CoreText (AppKit str.draw не работает без NSGraphicsContext)
+        let line = CTLineCreateWithAttributedString(str)
         ctx.saveGState()
-        ctx.translateBy(x: 0, y: size.height)
+        ctx.translateBy(x: rect.minX, y: rect.maxY)
         ctx.scaleBy(x: 1, y: -1)
-        str.draw(at: CGPoint(x: rect.minX, y: size.height - rect.maxY))
+        ctx.textPosition = CGPoint.zero
+        CTLineDraw(line, ctx)
         ctx.restoreGState()
     }
 
@@ -404,15 +433,24 @@ enum CGChart {
     // MARK: - Примитивы
 
     /// Текст: рисуется в перевернутых координатах (двойной флип локально).
+    /// Текст на CGContext через CoreText: работает на любом потоке,
+    /// без NSGraphicsContext (которого нет на display-link битмапе).
+    /// Координаты: SwiftUI-стиль (y сверху) — рисуем с локальным флипом.
     private static func drawText(_ str: NSAttributedString, at point: CGPoint, height: CGFloat) {
-        NSGraphicsContext.saveGraphicsState()
-        let t = NSAffineTransform()
-        t.translateX(by: 0, yBy: height)
-        t.scaleX(by: 1, yBy: -1)
-        t.concat()
-        str.draw(at: CGPoint(x: point.x, y: height - point.y))
-        NSGraphicsContext.restoreGraphicsState()
+        let line = CTLineCreateWithAttributedString(str)
+        currentDrawContextLock.lock()
+        let ctx = currentDrawContext
+        currentDrawContextLock.unlock()
+        guard let ctx else { return }
+        ctx.saveGState()
+        ctx.translateBy(x: point.x, y: height - point.y)
+        ctx.scaleBy(x: 1, y: -1)
+        ctx.textPosition = CGPoint.zero
+        CTLineDraw(line, ctx)
+        ctx.restoreGState()
     }
+
+
 
     private static func stroke(_ ctx: CGContext, _ path: CGPath, color: NSColor,
                                width: CGFloat, alpha: CGFloat = 1, dash: [CGFloat]? = nil, roundJoin: Bool = false) {
