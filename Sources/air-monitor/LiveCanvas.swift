@@ -16,18 +16,40 @@ final class LiveCanvasNSView: NSView {
     var drawer: ((CGContext, CGSize, CGPoint?, String) -> Void)?
 
     // Hover-состояние: пишется с main (mouseMoved), читается с DL-потока — под локом.
+    // ВАЖНО: замыкание-провайдер текста — MainActor-isolated (создаётся в View.body),
+    // поэтому ВЫЗЫВАЕТСЯ ТОЛЬКО на main (в mouseMoved). DL-поток читает ГОТОВЫЙ текст
+    // из hoverTextCache — иначе dispatch_assert_queue краш (v0.9.17 регрессия).
     private var hoverStorage: CGPoint?
     private let hoverLock = NSLock()
     var hoverPointSafe: CGPoint? {
         get { hoverLock.lock(); defer { hoverLock.unlock() }; return hoverStorage }
         set { hoverLock.lock(); hoverStorage = newValue; hoverLock.unlock() }
     }
-    /// Провайдер текста подсказки (main-поток задаёт, DL-поток вызывает под локом).
     private var hoverTextStorage: ((CGPoint) -> String)?
+    private var hoverTextCache: String = ""
     private let hoverTextLock = NSLock()
     var hoverTextProviderSafe: ((CGPoint) -> String)? {
         get { hoverTextLock.lock(); defer { hoverTextLock.unlock() }; return hoverTextStorage }
         set { hoverTextLock.lock(); hoverTextStorage = newValue; hoverTextLock.unlock() }
+    }
+
+    /// main-поток: обновить позицию мыши и пересчитать текст подсказки.
+    private func updateHover(on mainPoint: CGPoint) {
+        let provider = hoverTextProviderSafe
+        let text = provider?(mainPoint) ?? ""
+        hoverLock.lock()
+        hoverStorage = mainPoint
+        hoverLock.unlock()
+        hoverTextLock.lock()
+        hoverTextCache = text
+        hoverTextLock.unlock()
+    }
+
+    /// DL-поток: готовый текст для отрисовки.
+    private func cachedHoverText() -> String {
+        hoverTextLock.lock()
+        defer { hoverTextLock.unlock() }
+        return hoverTextCache
     }
     private let drawerLock = NSLock()
     nonisolated(unsafe) private var displayLink: CVDisplayLink?
@@ -171,7 +193,9 @@ final class LiveCanvasNSView: NSView {
         ctx.translateBy(x: 0, y: CGFloat(h))
         ctx.scaleBy(x: scale, y: -scale)
 
-        drawer(ctx, bounds.size, hoverPointSafe, hoverPointSafe.flatMap { hoverTextProviderSafe?( $0 ) } ?? "")
+        let cachedText = cachedHoverText()
+        let cachedPoint = hoverPointSafe
+        drawer(ctx, bounds.size, cachedPoint, cachedText)
         ctx.restoreGState()
 
         // ВАЖНО: makeImage() копирует буфер — это обязательная цена безопасности.
@@ -193,7 +217,8 @@ final class LiveCanvasNSView: NSView {
     // MARK: - Hover (позиция мыши внутри вью)
 
     override func mouseMoved(with event: NSEvent) {
-        hoverPointSafe = convert(event.locationInWindow, from: nil)
+        let local = convert(event.locationInWindow, from: nil)
+        updateHover(on: local)  // main-поток: провайдер вызывается здесь
     }
 
     override func mouseDragged(with event: NSEvent) {
