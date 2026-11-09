@@ -62,11 +62,9 @@ final class AppModel: ObservableObject {
             persistRTASettings()
         }
     }
-    @Published var updateRateHz: Double = 15 {
-        didSet {
-            persistUpdateRate()
-        }
-    }
+    /// Частота публикации снимков DSP→UI. Фиксирована 15 Гц: глазу достаточно,
+    /// и это вдвое снижает нагрузку против 30 Гц (см. историю оптимизаций).
+    let updateRateHz: Double = 15
     /// Показывать русские пояснения к метрикам.
     @Published var showMetricHints: Bool {
         didSet {
@@ -111,8 +109,6 @@ final class AppModel: ObservableObject {
            let decoded = try? JSONDecoder().decode(RTASettingsDTO.self, from: data) {
             rtaSettings = decoded.toSettings()
         }
-        let rate = UserDefaults.standard.double(forKey: "AirMonitor.updateRate")
-        if rate > 0 { updateRateHz = rate }
     }
 
     private func persistRTASettings() {
@@ -121,9 +117,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func persistUpdateRate() {
-        UserDefaults.standard.set(updateRateHz, forKey: "AirMonitor.updateRate")
-    }
 
     // MARK: - Устройства
 

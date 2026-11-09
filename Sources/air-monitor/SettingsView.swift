@@ -11,19 +11,6 @@ struct SettingsView: View {
                 Toggle("Русские пояснения к метрикам (Peak (пик), RMS (среднее)…)", isOn: $model.showMetricHints)
             }
 
-            Section("Обновление данных") {
-                VStack(alignment: .leading) {
-                    LabeledContent("Частота обновления UI") {
-                        Text(String(format: "%.0f Гц", model.updateRateHz))
-                            .monospacedDigit()
-                    }
-                    Slider(value: $model.updateRateHz, in: 5...60, step: 5)
-                    Text("Как часто перерисовываются цифры и графики. 25–30 Гц — комфортно и плавно.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
             Section("Порядок шин") {
                 if model.buses.isEmpty {
                     Text("Нет шин").foregroundStyle(.secondary)
