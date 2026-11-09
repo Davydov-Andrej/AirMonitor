@@ -27,39 +27,41 @@ struct MonitorView: View {
                 } label: {
                     Label("Окно S: \(sWindowLabel)", systemImage: "timer")
                 }
-                // Сглаживание ГРАФИКА громкости (числа всегда точные по стандарту).
+                // Сглаживание ГРАФИКА громкости (отдельная EMA-цепочка).
                 Menu {
                     Picker("Сглаживание", selection: Binding(
                         get: { model.rtaSettings.loudnessSmoothing },
                         set: { model.rtaSettings.loudnessSmoothing = $0 }
                     )) {
-                        // Значение — вес нового отсчёта при СПАДЕ (EMA):
-                        // 1 = спад мгновенный (без сглаживания), 0.1 = длинный плавный хвост.
-                        // Рост всегда мгновенный — пики видны сразу (как в Youlean).
+                        // Вес нового отсчёта при спаде: 1 = мгновенный спад,
+                        // меньше = длиннее хвост. Рост всегда в 4 раза быстрее спада.
                         Text("Выкл — спад мгновенный").tag(Float(1.0))
                         Text("Лёгкое (0.7)").tag(Float(0.7))
-                        Text("Среднее (0.4)").tag(Float(0.4))
-                        Text("Сильное (0.2)").tag(Float(0.2))
-                        Text("Максимальное (0.1)").tag(Float(0.1))
-                        Text("Экстра (0.05)").tag(Float(0.05))
-                        Text("Экстра+ (0.02) — почти прямая").tag(Float(0.02))
+                        Text("Среднее (0.3)").tag(Float(0.3))
+                        Text("Сильное (0.1)").tag(Float(0.1))
+                        Text("Максимальное (0.05)").tag(Float(0.05))
+                        Text("Экстра (0.03)").tag(Float(0.03))
+                        Text("Экстра+ (0.02) — стандарт").tag(Float(0.02))
+                        Text("Ультра (0.01)").tag(Float(0.01))
+                        Text("Ультра+ (0.005) — почти прямая").tag(Float(0.005))
                     }
                     .pickerStyle(.inline)
 
                 Divider()
 
-                // Сглаживание ЧИСЕЛ M/S (опционально; выкл = сырые значения).
+                // Сглаживание ЧИСЕЛ M/S: своя EMA-цепочка.
                 Picker("Числа", selection: Binding(
                     get: { model.rtaSettings.numberSmoothing },
                     set: { model.rtaSettings.numberSmoothing = $0 }
                 )) {
                     Text("Выкл — точные значения (для сверки)").tag(Float(1.0))
                     Text("Лёгкое (0.7)").tag(Float(0.7))
-                    Text("Плавные (0.4)").tag(Float(0.4))
-                    Text("Сильное (0.25)").tag(Float(0.25))
-                    Text("Как Youlean (0.15)").tag(Float(0.15))
-                    Text("Очень сильное (0.1)").tag(Float(0.1))
-                    Text("Экстра (0.05)").tag(Float(0.05))
+                    Text("Плавные (0.3)").tag(Float(0.3))
+                    Text("Сильное (0.15)").tag(Float(0.15))
+                    Text("Максимальное (0.1)").tag(Float(0.1))
+                    Text("Экстра (0.05) — стандарт").tag(Float(0.05))
+                    Text("Экстра+ (0.03)").tag(Float(0.03))
+                    Text("Ультра (0.02)").tag(Float(0.02))
                 }
                 .pickerStyle(.inline)
                 .help("Сглаживание числовых значений M/S. Рост всегда мгновенный (пики видны сразу), спад плавный. Выключите для сверки с эталонными метрами.")
@@ -114,11 +116,11 @@ struct MonitorView: View {
     private var smoothingLabel: String {
         switch model.rtaSettings.loudnessSmoothing {
         case 0.95...: return "выкл"
-        case 0.55..<0.95: return "лёгкое"
-        case 0.3..<0.55: return "среднее"
-        case 0.15..<0.3: return "сильное"
-        case 0.07..<0.15: return "макс."
-        default: return "экстра"
+        case 0.5..<0.95: return "лёгкое"
+        case 0.15..<0.5: return "среднее"
+        case 0.04..<0.15: return "сильное"
+        case 0.025..<0.04: return "экстра"
+        default: return "ультра"
         }
     }
 }

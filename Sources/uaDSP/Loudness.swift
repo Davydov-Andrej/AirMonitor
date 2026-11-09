@@ -99,6 +99,10 @@ public final class LoudnessMeter {
     private let smoothLock = NSLock()
     private var smoothM: Float = -Float.infinity
     private var smoothS: Float = -Float.infinity
+    // График (история) ведёт СВОЮ EMA-цепочку с собственной настройкой
+    // (loudnessSmoothing): можно сделать график плавнее чисел.
+    private var graphM: Float = -Float.infinity
+    private var graphS: Float = -Float.infinity
 
     public init(sampleRate: Double) {
         self.sampleRate = sampleRate
@@ -188,68 +192,50 @@ public final class LoudnessMeter {
         // Short-term: окно shortTermSeconds (по умолчанию 1 с).
         let rawS = windowLoudness(last: shortTermBlocks)
 
-        // Числа: EMA display-сглаживание (опционально, по умолчанию выкл).
-        // С выкл числа сырые по стандарту — совпадают с эталонными метрами.
-        // Включённое сглаживание — для комфортного мониторинга (Youlean-стиль):
-        // рост M мгновенный, спад плавный; S симметричный.
+        // ЧИСЛА: своя EMA-цепочка (numberSmoothing — вес нового отсчёта при спаде;
+        // рост в 4 раза быстрее спада). Состояние = то, что показывается в UI.
+        // ГРАФИК: ОТДЕЛЬНАЯ EMA-цепочка (loudnessSmoothing — как правило плавнее
+        // чисел). Каждая точка истории = значение графовой цепочки на этот момент:
+        // график выглядит как «история плавной кривой», а не сырых чисел.
         smoothLock.lock()
-        if numberSmoothing < 0.999 {
-            // alpha задан для 100 мс шага; шаг 50 мс — нормализация
-            let numAlpha = 1.0 - sqrtf(1.0 - numberSmoothing)
-            // СИММЕТРИЧНЫЙ EMA на числах (как дисплей Youlean): плавно в обе стороны.
-            // Пики видны с задержкой ~200-300 мс — цена плавных чисел; точные пики
-            // смотрятся на TruePeak и графике.
-            if smoothM.isFinite && rawM.isFinite {
-                momentary = smoothM + numAlpha * (rawM - smoothM)
-            } else {
-                momentary = rawM
-            }
-            if smoothS.isFinite && rawS.isFinite {
-                shortTerm = smoothS + numAlpha * (rawS - smoothS)
-            } else {
-                shortTerm = rawS
-            }
-            smoothM = momentary
-            smoothS = shortTerm
+        let numFall = 1.0 - sqrtf(1.0 - numberSmoothing)
+        let numRise = min(0.9, numFall * 4)
+        let graphFall = 1.0 - sqrtf(1.0 - displaySmoothing)
+        let graphRise = min(0.9, graphFall * 4)
+
+        // Числа
+        if smoothM.isFinite && rawM.isFinite {
+            let a = rawM > smoothM ? numRise : numFall
+            momentary = smoothM + a * (rawM - smoothM)
         } else {
             momentary = rawM
+        }
+        if smoothS.isFinite && rawS.isFinite {
+            shortTerm = smoothS + numFall * (rawS - smoothS)
+        } else {
             shortTerm = rawS
         }
+        smoothM = momentary
+        smoothS = shortTerm
+
+        // График
+        if graphM.isFinite && rawM.isFinite {
+            let a = rawM > graphM ? graphRise : graphFall
+            graphM = graphM + a * (rawM - graphM)
+        } else {
+            graphM = rawM
+        }
+        if graphS.isFinite && rawS.isFinite {
+            graphS = graphS + graphFall * (rawS - graphS)
+        } else {
+            graphS = rawS
+        }
         smoothLock.unlock()
 
-        // Display smoothing применяется ТОЛЬКО к графику истории (визуальная
-        // плавность). Числа всегда сырые — иначе расхождение с эталонными метрами.
-        // Momentary: асимметричный EMA (рост мгновенный — пики видны, спад плавный).
-        // Short-term: симметричный EMA (окно и так 1-3 с, и оно само по себе плавное;
-        // симметрия даёт ровную линию как у Youlean).
-        smoothLock.lock()
-        // alpha задан для 100 мс шага (10 Гц); шаг теперь 50 мс (20 Гц) —
-        // нормализуем, чтобы скорость сглаживания не изменилась:
-        let fallAlpha = 1.0 - sqrtf(1.0 - displaySmoothing)
-        // Рост: вдвое быстрее спада, но СГЛАЖЕННЫЙ — «пила» на пиках уходит,
-        // при этом пики всё равно достигаются первыми.
-        let riseAlphaGraph = min(0.9, fallAlpha * 4)
-        let smoothMValue: Float
-        if smoothM.isFinite && rawM.isFinite {
-            let a = rawM > smoothM ? riseAlphaGraph : fallAlpha
-            smoothMValue = smoothM + a * (rawM - smoothM)
-        } else {
-            smoothMValue = rawM
-        }
-        let smoothSValue: Float
-        if smoothS.isFinite && rawS.isFinite {
-            smoothSValue = smoothS + displaySmoothing * (rawS - smoothS)
-        } else {
-            smoothSValue = rawS
-        }
-        smoothM = smoothMValue
-        smoothS = smoothSValue
-        smoothLock.unlock()
-
-        // История 10 Гц (каждый 2-й подблок по 50 мс) — из СГЛАЖЕННЫХ значений.
+        // История 10 Гц — точки графовой цепочки (плавная линия).
         historyTick += 1
         if historyTick % 2 == 0 {
-            let hp = HistoryPoint(momentary: smoothMValue, shortTerm: smoothSValue, peak: truePeakDB)
+            let hp = HistoryPoint(momentary: graphM, shortTerm: graphS, peak: truePeakDB)
             history.append(hp)
             if history.count > historyCapacity {
                 history.removeFirst(history.count - historyCapacity)
