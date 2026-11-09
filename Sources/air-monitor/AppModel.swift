@@ -76,14 +76,7 @@ final class AppModel: ObservableObject {
     /// Сглаживание показаний метрик (как в Youlean): цифры не мельтешат.
     /// 0 = выкл, 0.5 = умеренное, 0.9 = сильное. @Published на main для UI,
     /// значение дублируется в nonisolated-хранилище для DSP-потока.
-    @Published var displaySmoothing: Float {
-        didSet {
-            UserDefaults.standard.set(Double(displaySmoothing), forKey: "AirMonitor.displaySmoothing")
-            displaySmoothingStore.store(displaySmoothing)
-        }
-    }
-    /// nonisolated-копия для доступа из DSP-потока.
-    private let displaySmoothingStore = AtomicFloat(displaySmoothing: 0.5)
+
 
     let deviceEngine = MultiDeviceCapture()
     private var publisher: AudioDataPublisher?
@@ -94,10 +87,7 @@ final class AppModel: ObservableObject {
 
     init() {
         showMetricHints = UserDefaults.standard.bool(forKey: "AirMonitor.showMetricHints")
-        let ds = UserDefaults.standard.float(forKey: "AirMonitor.displaySmoothing")
-        // Конверсия старой (инвертированной) семантики: 0.9 стар. = 1.0 нов.
-        displaySmoothing = (ds > 0.001) ? ds : 0.5
-        displaySmoothingStore.store(displaySmoothing)  // синхронизация без didSet
+
         loadSettings()
         loadScenes()
         if let lastName = UserDefaults.standard.string(forKey: lastSceneKey),
@@ -455,12 +445,8 @@ final class AppModel: ObservableObject {
                 self?.syncOrderFromSnapshot(newOrder)
             }
         }
-        // Display smoothing (Youlean-стиль): плавно ведём показания к новым.
-        let alpha = displaySmoothingStore.load()
-        let smoothed = applyDisplaySmoothing(snapshot, alpha: alpha)
-
         holdersLock.lock()
-        let targets = smoothed.buses.compactMap { bus in
+        let targets = snapshot.buses.compactMap { bus in
             (bus, holders[bus.id])
         }
         holdersLock.unlock()
@@ -469,66 +455,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Экспоненциальное сглаживание громкостей и уровней в снимке.
-    /// previous — последние показания для той же шины (по id).
-    nonisolated private func applyDisplaySmoothing(_ snapshot: AppSnapshot, alpha: Float) -> AppSnapshot {
-        guard alpha > 0.01 else { return snapshot }
-        var buses: [BusSnapshot] = []
-        for bus in snapshot.buses {
-            var channels: [ChannelSnapshot] = []
-            for ch in bus.channels {
-                channels.append(smoothChannel(ch, key: bus.id, sub: ch.id, alpha: alpha))
-            }
-            var mono: ChannelSnapshot?
-            if let m = bus.mono {
-                mono = smoothChannel(m, key: bus.id, sub: -1, alpha: alpha)
-            }
-            buses.append(BusSnapshot(
-                id: bus.id, name: bus.name, mode: bus.mode,
-                channels: channels, mono: mono,
-                correlation: bus.correlation,
-                sampleRate: bus.sampleRate, frameCount: bus.frameCount,
-                hasSignal: bus.hasSignal
-            ))
-        }
-        return AppSnapshot(
-            buses: buses,
-            integratedLUFS: snapshot.integratedLUFS,
-            loudnessRangeLU: snapshot.loudnessRangeLU,
-            timestamp: snapshot.timestamp
-        )
-    }
 
-    /// Сглаживает числовые поля одного канала (EMA от прошлого показания).
-    nonisolated private func smoothChannel(_ ch: ChannelSnapshot, key: BusID, sub: Int, alpha: Float) -> ChannelSnapshot {
-        let dictKey = "\(key.uuid)|\(sub)"
-        let prev = displayState[dictKey]
-        // Спектр/RTA/историю не трогаем: графики сглаживаются своими механизмами.
-        func ema(_ new: Float, _ old: Float?) -> Float {
-            guard let old, old.isFinite, new.isFinite else { return new }
-            return old + alpha * (new - old)
-        }
-        displayState[dictKey] = ChannelSnapshot(
-            id: ch.id, label: ch.label,
-            peakDB: ema(ch.peakDB, prev?.peakDB),
-            rmsDB: ema(ch.rmsDB, prev?.rmsDB),
-            vuDB: ema(ch.vuDB, prev?.vuDB),
-            truePeakDB: max(ch.truePeakDB, prev?.truePeakDB ?? ch.truePeakDB),  // TP не падает
-            crestFactorDB: ema(ch.crestFactorDB, prev?.crestFactorDB),
-            momentaryLUFS: ema(ch.momentaryLUFS, prev?.momentaryLUFS),
-            shortTermLUFS: ema(ch.shortTermLUFS, prev?.shortTermLUFS),
-            spectrum: ch.spectrum,
-            rtaBands: ch.rtaBands,
-            fineCurve: ch.fineCurve,
-            loudnessHistory: ch.loudnessHistory,
-            integratedLUFS: ema(ch.integratedLUFS, prev?.integratedLUFS),
-            loudnessRangeLU: ema(ch.loudnessRangeLU, prev?.loudnessRangeLU)
-        )
-        return displayState[dictKey]!
-    }
-
-    /// Последние показания для display smoothing (Bus|channel → снимок).
-    nonisolated(unsafe) private var displayState: [String: ChannelSnapshot] = [:]
     /// Флаг изменения порядка (ставится из DSP-потока, снимается на MainActor).
     private let orderChangedLock = NSLock()
     private var orderChangedPending: [BusID]? = nil
@@ -700,25 +627,5 @@ final class BusSnapshotHolder {
         storage = snapshot
         version += 1
         lock.unlock()
-    }
-}
-
-/// Потокобезопасный Float (для настроек, читаемых с DSP-потока).
-final class AtomicFloat: @unchecked Sendable {
-    private var value: Float
-    private let lock = NSLock()
-
-    init(displaySmoothing: Float) { value = displaySmoothing }
-
-    func store(_ v: Float) {
-        lock.lock()
-        value = v
-        lock.unlock()
-    }
-
-    func load() -> Float {
-        lock.lock()
-        defer { lock.unlock() }
-        return value
     }
 }

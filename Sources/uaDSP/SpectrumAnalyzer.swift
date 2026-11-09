@@ -51,11 +51,16 @@ public struct RTASettings: Sendable {
     public var peakHoldSeconds: Float
     /// Высокое разрешение кривой (1/24 октавы) поверх октавных полос.
     public var showFineCurve: Bool
+    /// Автодеградирование разрешения при высокой нагрузке (отключается вручную).
+    public var autoDowngrade: Bool
     /// Окно short-term громкости в секундах (по умолчанию 1 с).
     public var shortTermSeconds: Double
     /// Сглаживание кривой по соседним полосам (0 = нет, N = ±N полос).
     /// 0 — мелкие пики узких полос; 3-5 — ровная «общая картина».
     public var neighborSmoothing: Float
+    /// Сглаживание показаний громкости (Youlean-стиль): EMA-вес нового значения.
+    /// 1.0 = без сглаживания; 0.1 = сильное. Влияет на M/S числа и график истории.
+    public var loudnessSmoothing: Float
 
     public init(
         bandsPerOctave: Int = 3,
@@ -63,16 +68,20 @@ public struct RTASettings: Sendable {
         release: Float = 0.08,
         peakHoldSeconds: Float = 1.5,
         showFineCurve: Bool = true,
+        autoDowngrade: Bool = true,
         shortTermSeconds: Double = 1.0,
-        neighborSmoothing: Float = 0
+        neighborSmoothing: Float = 0,
+        loudnessSmoothing: Float = 1.0
     ) {
         self.bandsPerOctave = bandsPerOctave
         self.attack = attack
         self.release = release
         self.peakHoldSeconds = peakHoldSeconds
         self.showFineCurve = showFineCurve
+        self.autoDowngrade = autoDowngrade
         self.shortTermSeconds = shortTermSeconds
         self.neighborSmoothing = neighborSmoothing
+        self.loudnessSmoothing = loudnessSmoothing
     }
 
     public static let `default` = RTASettings()
@@ -141,9 +150,8 @@ public final class RTASpectrumAnalyzer {
         ring.append(contentsOf: samples)
 
         let length = fft.length
-        // Перекрытие 75%: при 4096/48кГц это ~47 FFT/с — график живой.
-        // Дешевле, чем кажется: FFT 4096 ~0.1 мс на M-серии.
         let hop = max(1, length / 4)
+        let t0 = CFAbsoluteTimeGetCurrent()
         while ring.count >= length {
             let block = Array(ring[0..<length])
             if hop >= ring.count {
@@ -155,10 +163,39 @@ public final class RTASpectrumAnalyzer {
             guard power.count == fft.halfLength else { continue }
             integrate(power)
         }
+        let spent = CFAbsoluteTimeGetCurrent() - t0
+
+        // Автодеградирование: если кадр занимает > 60% интервала FFT — нагрузка
+        // высока, снижаем разрешение тонкой кривой (ступени: 24 → 12 → 6 → off).
+        if settings.autoDowngrade {
+            let frameBudget = Float(hop) / fft.sampleRate
+            updateLoadBudget(spent: Float(spent), budget: frameBudget)
+        }
         if ring.count > length * 2 {
             ring.removeFirst(ring.count - length)
         }
     }
+
+    /// Текущий уровень автодеградирования (0 = полный, 3 = тонкая кривая выкл).
+    public private(set) var downgradeLevel: Int = 0
+    private var loadEma: Float = 0
+
+    private func updateLoadBudget(spent: Float, budget: Float) {
+        // EMA загрузки: 1.0 = кадр занимает весь бюджет (потолок).
+        let ratio = min(2.0, spent / max(budget, 0.0001))
+        loadEma = loadEma * 0.95 + ratio * 0.05
+
+        let target: Int
+        if loadEma > 1.8 { target = 3 }       // кривая выкл
+        else if loadEma > 1.2 { target = 2 }  // 1/6 октавы
+        else if loadEma > 0.8 { target = 1 }  // 1/12 октавы
+        else { target = 0 }                   // максимум (1/24)
+        if target != downgradeLevel {
+            downgradeLevel = target
+            needsRebuild = true
+        }
+    }
+    private var needsRebuild = false
 
     // MARK: - Ядро
 
@@ -195,11 +232,12 @@ public final class RTASpectrumAnalyzer {
         bandPeak = [Float](repeating: -120, count: oct.ranges.count)
         bandPeakTicks = [Float](repeating: 0, count: oct.ranges.count)
 
-        if settings.showFineCurve {
-            // Тонкая кривая масштабируется с настройкой полос: детали растут вместе.
-            // Cap 24 полос/окт (288 точек): выше — отрисовка растёт, пользы нет
-            // (окно FFT 4096 всё равно не разрешает уже 1/24 октавы на низах).
-            let finePPO = min(24, max(6, Float(max(1, settings.bandsPerOctave)) * 4))
+        if settings.showFineCurve && downgradeLevel < 3 {
+            // Тонкая кривая масштабируется с настройкой полос и автодеградированием:
+            // уровень 0 = максимум (cap 24), 1 = 12, 2 = 6, 3 = выкл.
+            let capByLevel: [Float] = [24, 12, 6, 0]
+            let cap = capByLevel[downgradeLevel]
+            let finePPO = min(cap, max(6, Float(max(1, settings.bandsPerOctave)) * 4))
             let fine = buildGrid(finePPO)
             fineCenterHz = fine.centers
             fineRange = fine.ranges
@@ -345,6 +383,10 @@ public final class RTASpectrumAnalyzer {
     public func snapshotData() -> (bands: [RTABand], fine: [SpectrumPoint]) {
         lock.lock()
         defer { lock.unlock() }
+        if needsRebuild {
+            rebuildBands()
+            needsRebuild = false
+        }
         if bandsDirty {
             publishBands()
         }

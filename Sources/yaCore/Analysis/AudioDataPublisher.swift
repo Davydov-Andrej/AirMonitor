@@ -325,6 +325,19 @@ public final class AudioDataPublisher: @unchecked Sendable {
         publish?(app)
     }
 
+    /// Применяет display smoothing громкости к работающим анализаторам.
+    public func applyLoudnessSmoothing(_ alpha: Float) {
+        analysisQueue.async { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            let runtimes = Array(self.buses.values)
+            self.lock.unlock()
+            for runtime in runtimes {
+                runtime.applyLoudnessSmoothing(alpha)
+            }
+        }
+    }
+
     /// Применяет настройки RTA ко всем работающим анализаторам немедленно.
     public func applyRTASettings(_ newSettings: RTASettings) {
         analysisQueue.async { [weak self] in
@@ -379,6 +392,14 @@ public final class BusRuntime: @unchecked Sendable {
             monoAnalyzers: monoAnalyzers,
             stereoAnalyzer: stereoAnalyzer
         )
+    }
+
+    /// Применяет display smoothing громкости ко всем анализаторам шины.
+    public func applyLoudnessSmoothing(_ alpha: Float) {
+        monoAnalyzers.values.forEach { $0.applyLoudnessSmoothing(alpha) }
+        stereoAnalyzer?.monoAnalyzer.applyLoudnessSmoothing(alpha)
+        stereoAnalyzer?.leftAnalyzer.applyLoudnessSmoothing(alpha)
+        stereoAnalyzer?.rightAnalyzer.applyLoudnessSmoothing(alpha)
     }
 
     /// Применяет настройки RTA ко всем анализаторам шины немедленно.

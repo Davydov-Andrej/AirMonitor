@@ -28,6 +28,7 @@ public final class ChannelAnalyzerSet {
         self.loudness = LoudnessMeter(sampleRate: Double(sampleRate))
         self.rta = RTASpectrumAnalyzer(length: fftLength, sampleRate: sampleRate, windowType: windowType)
         self.loudness.shortTermSeconds = 1.0
+        self.loudness.displaySmoothing = 1.0
     }
 
     public init(channelIndex: Int, label: String, sampleRate: Float, fftLength: Int, windowType: FFT.WindowType = .hann, rtaSettings: RTASettings = .default) {
@@ -39,6 +40,7 @@ public final class ChannelAnalyzerSet {
         self.loudness = LoudnessMeter(sampleRate: Double(sampleRate))
         self.rta = RTASpectrumAnalyzer(length: fftLength, sampleRate: sampleRate, settings: rtaSettings, windowType: windowType)
         self.loudness.shortTermSeconds = rtaSettings.shortTermSeconds
+        self.loudness.displaySmoothing = rtaSettings.loudnessSmoothing
     }
 
     public func process(_ samples: [Float], sampleRate: Float) {
@@ -51,9 +53,15 @@ public final class ChannelAnalyzerSet {
         lastSpectrumDirty = true
     }
 
+    /// Применяет display smoothing громкости немедленно.
+    public func applyLoudnessSmoothing(_ alpha: Float) {
+        loudness.displaySmoothing = alpha
+    }
+
     /// Применяет новые настройки RTA немедленно (без пересоздания).
     public func applyRTASettings(_ settings: RTASettings) {
         loudness.shortTermSeconds = settings.shortTermSeconds
+        loudness.displaySmoothing = settings.loudnessSmoothing
         rta.updateSettings(settings)
         lastSpectrumDirty = true
     }

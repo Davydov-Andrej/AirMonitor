@@ -77,6 +77,21 @@ public final class LoudnessMeter {
     }
     private var shortTermBlocks: Int = 10
 
+    /// Display smoothing (Youlean-стиль): EMA-вес НОВОГО значения.
+    /// 1.0 = без сглаживания (значение мгновенное), 0.1 = сильное сглаживание.
+    /// Сглаживает momentary/shortTerm и ИСТОРИЮ (график).
+    public var displaySmoothing: Float = 1.0 {
+        didSet {
+            smoothLock.lock()
+            smoothM = -Float.infinity
+            smoothS = -Float.infinity
+            smoothLock.unlock()
+        }
+    }
+    private let smoothLock = NSLock()
+    private var smoothM: Float = -Float.infinity
+    private var smoothS: Float = -Float.infinity
+
     public init(sampleRate: Double) {
         self.sampleRate = sampleRate
         self.kFilter = KWeightingFilter(sampleRate: Float(sampleRate))
@@ -160,12 +175,29 @@ public final class LoudnessMeter {
         }
 
         // Momentary: последние 4 подблока (400 мс).
-        momentary = windowLoudness(last: 4)
+        let rawM = windowLoudness(last: 4)
 
         // Short-term: окно shortTermSeconds (по умолчанию 1 с).
-        shortTerm = windowLoudness(last: shortTermBlocks)
+        let rawS = windowLoudness(last: shortTermBlocks)
 
-        // История 10 Гц.
+        // Display smoothing: EMA к новому значению (Youlean-стиль).
+        // При -inf старого или нового — passthrough (иначе заморозка на -inf).
+        smoothLock.lock()
+        if smoothM.isFinite && rawM.isFinite {
+            momentary = smoothM + displaySmoothing * (rawM - smoothM)
+        } else {
+            momentary = rawM
+        }
+        if smoothS.isFinite && rawS.isFinite {
+            shortTerm = smoothS + displaySmoothing * (rawS - smoothS)
+        } else {
+            shortTerm = rawS
+        }
+        smoothM = momentary
+        smoothS = shortTerm
+        smoothLock.unlock()
+
+        // История 10 Гц — из сглаженных значений: график плавный как у Youlean.
         let hp = HistoryPoint(momentary: momentary, shortTerm: shortTerm, peak: truePeakDB)
         history.append(hp)
         if history.count > historyCapacity {

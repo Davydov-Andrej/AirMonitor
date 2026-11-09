@@ -30,11 +30,11 @@ struct MonitorView: View {
                 // Сглаживание показаний (Youlean-стиль): цифры не мельтешат.
                 Menu {
                     Picker("Сглаживание", selection: Binding(
-                        get: { model.displaySmoothing },
-                        set: { model.displaySmoothing = $0 }
+                        get: { model.rtaSettings.loudnessSmoothing },
+                        set: { model.rtaSettings.loudnessSmoothing = $0 }
                     )) {
                         // Значение — «вес нового отсчёта» в EMA:
-                        // 1 = без сглаживания (значение мгновенно), 0 = полная заморозка.
+                        // 1 = без сглаживания (мгновенно), меньше = плавнее.
                         Text("Выкл — точные значения").tag(Float(1.0))
                         Text("Лёгкое (0.7)").tag(Float(0.7))
                         Text("Умеренное (0.5) — как Youlean").tag(Float(0.5))
@@ -75,7 +75,7 @@ struct MonitorView: View {
     }
 
     private var smoothingLabel: String {
-        switch model.displaySmoothing {
+        switch model.rtaSettings.loudnessSmoothing {
         case 0.95...: return "выкл"
         case 0.6..<0.95: return "лёгкое"
         case 0.4..<0.6: return "умеренное"

@@ -56,6 +56,12 @@ struct SpectrumView: View {
                 ))
 
                 Toggle("Тонкая кривая (детальные пики EQ)", isOn: $model.rtaSettings.showFineCurve)
+
+                Toggle("Авто-снижение разрешения при нагрузке", isOn: Binding(
+                    get: { model.rtaSettings.autoDowngrade },
+                    set: { model.rtaSettings.autoDowngrade = $0 }
+                ))
+                .help("При высокой загрузке CPU автоматически уменьшает детальность тонкой кривой (1/24 → 1/12 → 1/6 октавы → выкл), чтобы спектр не пропадал. Выключите, если хотите всегда максимальную детальность.")
             } label: {
                 Label("Полосы: 1/\(model.rtaSettings.bandsPerOctave) окт", systemImage: "slider.horizontal.3")
             }
