@@ -27,7 +27,7 @@ public final class ChannelAnalyzerSet {
         self.dynamics = DynamicsAnalyzer(sampleRate: sampleRate)
         self.loudness = LoudnessMeter(sampleRate: Double(sampleRate))
         self.rta = RTASpectrumAnalyzer(length: fftLength, sampleRate: sampleRate, windowType: windowType)
-        self.loudness.shortTermSeconds = 1.0
+        self.loudness.shortTermSeconds = 3.0
         self.loudness.displaySmoothing = 1.0
     }
 

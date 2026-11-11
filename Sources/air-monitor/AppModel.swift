@@ -25,6 +25,30 @@ struct MonitorScene: Codable, Identifiable {
     }
 }
 
+enum AppTheme: String, CaseIterable, Identifiable {
+    case system
+    case light
+    case dark
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .system: "Как в системе"
+        case .light: "Светлая"
+        case .dark: "Тёмная"
+        }
+    }
+
+    func resolvedColorScheme(system: ColorScheme) -> ColorScheme {
+        switch self {
+        case .system: system
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
+
 /// Глобальная модель приложения: управляет шинами мониторинга.
 @MainActor
 final class AppModel: ObservableObject {
@@ -32,6 +56,21 @@ final class AppModel: ObservableObject {
     // Выбираемые устройства и шины
     @Published var devices: [AudioDeviceInfo] = []
     @Published var buses: [MonitorBus] = []
+    @Published var dashboardColumns: DashboardColumnLayout {
+        didSet { UserDefaults.standard.set(dashboardColumns.rawValue, forKey: "AirMonitor.dashboardColumns") }
+    }
+    @Published var dashboardCardSize: DashboardCardSize {
+        didSet { UserDefaults.standard.set(dashboardCardSize.rawValue, forKey: "AirMonitor.dashboardCardSize") }
+    }
+    @Published var dashboardAutoWrapModules: Bool {
+        didSet { UserDefaults.standard.set(dashboardAutoWrapModules, forKey: "AirMonitor.dashboardAutoWrapModules") }
+    }
+    @Published var dashboardAutoStretchGraphs: Bool {
+        didSet { UserDefaults.standard.set(dashboardAutoStretchGraphs, forKey: "AirMonitor.dashboardAutoStretchGraphs") }
+    }
+    @Published var appTheme: AppTheme {
+        didSet { UserDefaults.standard.set(appTheme.rawValue, forKey: "AirMonitor.appTheme") }
+    }
 
     // Снимки для UI
     @Published var snapshot: AppSnapshot = .empty
@@ -92,9 +131,15 @@ final class AppModel: ObservableObject {
     private let lastSceneKey = "AirMonitor.lastScene"
 
     init() {
+        appTheme = AppTheme(rawValue: UserDefaults.standard.string(forKey: "AirMonitor.appTheme") ?? "") ?? .system
         showMetricHints = UserDefaults.standard.bool(forKey: "AirMonitor.showMetricHints")
         let savedOffset = UserDefaults.standard.float(forKey: "AirMonitor.lufsOffset")
         lufsOffset = savedOffset
+        let savedColumns = UserDefaults.standard.integer(forKey: "AirMonitor.dashboardColumns")
+        dashboardColumns = DashboardColumnLayout(rawValue: savedColumns) ?? .one
+        dashboardCardSize = DashboardCardSize(rawValue: UserDefaults.standard.string(forKey: "AirMonitor.dashboardCardSize") ?? "") ?? .standard
+        dashboardAutoWrapModules = UserDefaults.standard.object(forKey: "AirMonitor.dashboardAutoWrapModules") as? Bool ?? true
+        dashboardAutoStretchGraphs = UserDefaults.standard.object(forKey: "AirMonitor.dashboardAutoStretchGraphs") as? Bool ?? true
 
         loadSettings()
         loadScenes()
@@ -316,6 +361,138 @@ final class AppModel: ObservableObject {
         guard let index = buses.firstIndex(where: { $0.id == id }), index < buses.count - 1 else { return }
         buses.swapAt(index, index + 1)
         syncBusOrder()
+        autosaveCurrentScene()
+    }
+
+    /// Переместить карточку шины до/после другой карточки на дашборде.
+    func moveBus(id: BusID, relativeTo targetID: BusID, after: Bool) {
+        guard id != targetID,
+              let sourceIndex = buses.firstIndex(where: { $0.id == id }),
+              let targetIndex = buses.firstIndex(where: { $0.id == targetID }) else { return }
+        let bus = buses.remove(at: sourceIndex)
+        var destination = targetIndex + (after ? 1 : 0)
+        if sourceIndex < destination { destination -= 1 }
+        destination = max(0, min(buses.count, destination))
+        guard destination != sourceIndex else {
+            buses.insert(bus, at: sourceIndex)
+            return
+        }
+        buses.insert(bus, at: destination)
+        syncBusOrder()
+        autosaveCurrentScene()
+    }
+
+    func setDashboardModuleVisible(_ module: DashboardModule, on busID: BusID, visible: Bool) {
+        guard let index = buses.firstIndex(where: { $0.id == busID }) else { return }
+        var config = buses[index].config
+        if visible {
+            config.hiddenDashboardModules.remove(module)
+            if !config.dashboardModuleOrder.contains(module) {
+                config.dashboardModuleOrder.append(module)
+            }
+        } else {
+            config.hiddenDashboardModules.insert(module)
+        }
+        buses[index].config = config
+        autosaveCurrentScene()
+    }
+
+    func setDashboardModuleSize(_ module: DashboardModule, on busID: BusID, width: Double, height: Double) {
+        guard let index = buses.firstIndex(where: { $0.id == busID }) else { return }
+        var config = buses[index].config
+        config.dashboardModuleWidths[module.rawValue] = max(module.minimumWidth, min(1_200, width))
+        config.dashboardModuleHeights[module.rawValue] = max(module.minimumHeight, min(700, height))
+        buses[index].config = config
+        autosaveCurrentScene()
+    }
+
+    func setDashboardModuleRow(_ module: DashboardModule, on busID: BusID, row: Int) {
+        guard let index = buses.firstIndex(where: { $0.id == busID }) else { return }
+        var config = buses[index].config
+        let newRow = max(0, min(1, row))
+        guard config.dashboardModuleRows[module.rawValue] != newRow else { return }
+        config.dashboardModuleRows[module.rawValue] = newRow
+        buses[index].config = config
+        autosaveCurrentScene()
+    }
+
+    func clearDashboardModuleRowOverrides(on busID: BusID) {
+        guard let index = buses.firstIndex(where: { $0.id == busID }),
+              !buses[index].config.dashboardModuleRowOverrides.isEmpty else { return }
+        buses[index].config.dashboardModuleRowOverrides = [:]
+        autosaveCurrentScene()
+    }
+
+    func setDashboardModuleRowOverride(_ module: DashboardModule, on busID: BusID, row: Int) {
+        guard let index = buses.firstIndex(where: { $0.id == busID }) else { return }
+        let newRow = max(0, min(1, row))
+        guard buses[index].config.dashboardModuleRowOverrides[module.rawValue] != newRow else { return }
+        buses[index].config.dashboardModuleRowOverrides[module.rawValue] = newRow
+        autosaveCurrentScene()
+    }
+
+    func setDashboardModuleRows(_ rows: [[DashboardModule]], on busID: BusID) {
+        guard let index = buses.firstIndex(where: { $0.id == busID }) else { return }
+        var config = buses[index].config
+        var changed = false
+        for (row, modules) in rows.enumerated() {
+            for module in modules {
+                let value = min(1, row)
+                if config.dashboardModuleRows[module.rawValue] != value {
+                    config.dashboardModuleRows[module.rawValue] = value
+                    changed = true
+                }
+            }
+        }
+        guard changed else { return }
+        buses[index].config = config
+        autosaveCurrentScene()
+    }
+
+    func moveDashboardModule(_ module: DashboardModule, on busID: BusID,
+                             relativeTo target: DashboardModule, after: Bool, row: Int,
+                             autoWrapRowOverride: Bool = false) {
+        guard module != target,
+              let index = buses.firstIndex(where: { $0.id == busID }) else { return }
+        var config = buses[index].config
+        var order = config.dashboardModuleOrder
+        for item in DashboardModule.allCases where !order.contains(item) { order.append(item) }
+        guard let sourceIndex = order.firstIndex(of: module),
+              let targetIndex = order.firstIndex(of: target) else { return }
+        order.remove(at: sourceIndex)
+        var destination = targetIndex + (after ? 1 : 0)
+        if sourceIndex < destination { destination -= 1 }
+        destination = max(0, min(order.count, destination))
+        order.insert(module, at: destination)
+        let newRow = max(0, min(1, row))
+        let rowChanged = autoWrapRowOverride
+            ? config.dashboardModuleRowOverrides[module.rawValue] != newRow
+            : config.dashboardModuleRows[module.rawValue] != newRow
+        guard order != config.dashboardModuleOrder || rowChanged else { return }
+        config.dashboardModuleOrder = order
+        if autoWrapRowOverride {
+            config.dashboardModuleRowOverrides[module.rawValue] = newRow
+        } else {
+            config.dashboardModuleRows[module.rawValue] = newRow
+        }
+        buses[index].config = config
+        autosaveCurrentScene()
+    }
+
+    func resetDashboardModules(on busID: BusID) {
+        guard let index = buses.firstIndex(where: { $0.id == busID }) else { return }
+        var config = buses[index].config
+        config.dashboardModuleOrder = DashboardModule.allCases
+        config.hiddenDashboardModules = [.mixBalance]
+        config.dashboardModuleWidths = Dictionary(uniqueKeysWithValues: DashboardModule.allCases.map {
+            ($0.rawValue, $0.defaultWidth)
+        })
+        config.dashboardModuleHeights = Dictionary(uniqueKeysWithValues: DashboardModule.allCases.map {
+            ($0.rawValue, $0.defaultHeight)
+        })
+        config.dashboardModuleRows = [:]
+        config.dashboardModuleRowOverrides = [:]
+        buses[index].config = config
         autosaveCurrentScene()
     }
 

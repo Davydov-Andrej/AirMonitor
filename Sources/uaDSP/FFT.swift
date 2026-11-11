@@ -1,8 +1,10 @@
 import Foundation
 import Accelerate
 
-/// Оконный FFT поверх vDSP. Вход — float[length], выход — линейные мощности
-/// (для RTA) или амплитуды в дБFS (для точечных измерений) на бин.
+/// Оконный FFT поверх vDSP.
+/// `powerSpectrum` возвращает one-sided мощность с нормировкой по энергии окна,
+/// а `magnitudeDB` — амплитуду синусоидального компонента с нормировкой по
+/// когерентному усилению окна.
 public final class FFT {
     public enum WindowType {
         case hann, hamming, blackmanHarris
@@ -14,90 +16,71 @@ public final class FFT {
 
     private let log2n: vDSP_Length
     private let fftSetup: FFTSetup
-    private var window: [Float]
+    private let window: [Float]
+    private let windowSum: Float
+    private let windowPowerSum: Float
 
     public init?(length: Int, sampleRate: Float, windowType: WindowType = .hann) {
-        guard length > 0, (length & (length - 1)) == 0 else { return nil }
+        guard length >= 2,
+              (length & (length - 1)) == 0,
+              sampleRate.isFinite,
+              sampleRate > 0 else { return nil }
         self.length = length
         self.halfLength = length / 2
         self.sampleRate = sampleRate
-
         self.log2n = vDSP_Length(log2(Float(length)))
         guard let setup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else {
             return nil
         }
         self.fftSetup = setup
 
-        self.window = [Float](repeating: 0, count: length)
-        applyWindow(of: windowType, into: &window)
+        var weights = [Float](repeating: 0, count: length)
+        Self.makeWindow(windowType, into: &weights)
+        self.window = weights
+        self.windowSum = weights.reduce(0, +)
+        self.windowPowerSum = weights.reduce(Float(0)) { $0 + $1 * $1 }
     }
 
     deinit {
         vDSP_destroy_fftsetup(fftSetup)
     }
 
-    /// Линейный спектр мощности на бины (без дБ). Длина `halfLength`.
-    /// Бин i соответствует частоте `i * sampleRate / length`.
+    /// Линейная one-sided мощность на бины (без дБ), длина `halfLength`.
+    /// Сумма мощностей бинов соответствует peak-equivalent уровню сигнала.
     public func powerSpectrum(_ input: UnsafeBufferPointer<Float>) -> [Float] {
         guard input.count >= length else { return [] }
-
-        var windowed = [Float](repeating: 0, count: length)
-        for i in 0..<length {
-            windowed[i] = input[i] * window[i]
-        }
-
-        var real = [Float](repeating: 0, count: halfLength)
-        var imag = [Float](repeating: 0, count: halfLength)
-        // vDSP_fft_zrip ожидает «packed» формат: realp = чётные отсчёты,
-        // imagp = нечётные отсчёты исходного реального сигнала.
-        for i in 0..<halfLength {
-            real[i] = windowed[i * 2]
-            imag[i] = windowed[i * 2 + 1]
-        }
-
+        let (real, imag) = transform(input)
+        let denominator = Float(length) * max(windowPowerSum, 1e-20)
         var power = [Float](repeating: 0, count: halfLength)
 
-        real.withUnsafeMutableBufferPointer { rp in
-            imag.withUnsafeMutableBufferPointer { ip in
-                var split = DSPSplitComplex(
-                    realp: rp.baseAddress!,
-                    imagp: ip.baseAddress!
-                )
-                vDSP_fft_zrip(
-                    fftSetup,
-                    &split,
-                    1,
-                    log2n,
-                    FFTDirection(kFFTDirection_Forward)
-                )
-                let scale = Float(2.0 / Float(length))
-                var reCopy = [Float](repeating: 0, count: halfLength)
-                var imCopy = [Float](repeating: 0, count: halfLength)
-                reCopy.withUnsafeMutableBufferPointer { rcp in
-                    rcp.baseAddress!.update(from: split.realp, count: halfLength)
-                }
-                imCopy.withUnsafeMutableBufferPointer { icp in
-                    icp.baseAddress!.update(from: split.imagp, count: halfLength)
-                }
-                let scale2 = scale * scale
-                for bin in 0..<halfLength {
-                    let re = reCopy[bin]
-                    let im = imCopy[bin]
-                    power[bin] = (re * re + im * im) * scale2
-                }
+        // vDSP_fft_zrip хранит DC в realp[0], Nyquist в imagp[0],
+        // а forward transform возвращает значения, умноженные на 2.
+        // Для DC нет симметричной отрицательной частоты, поэтому поправка
+        // отличается от обычных one-sided бинов.
+        power[0] = (real[0] / (2 * max(windowSum, 1e-20)))
+            * (real[0] / (2 * max(windowSum, 1e-20)))
+        if halfLength > 1 {
+            for bin in 1..<halfLength {
+                let re = real[bin]
+                let im = imag[bin]
+                power[bin] = (re * re + im * im) / denominator
             }
         }
-
         return power
     }
 
-    /// Амплитуды в дБFS по бинам. Массив длины `halfLength`.
+    /// Амплитуда синусоидального компонента в дБFS, длина `halfLength`.
+    /// Нормировка по сумме окна убирает зависимость от выбора окна.
     public func magnitudeDB(_ input: UnsafeBufferPointer<Float>) -> [Float] {
-        let power = powerSpectrum(input)
-        guard power.count == halfLength else { return [] }
+        guard input.count >= length else { return [] }
+        let (real, imag) = transform(input)
+        let coherentGain = max(windowSum, 1e-20)
         var magnitudes = [Float](repeating: 0, count: halfLength)
-        for i in 0..<halfLength {
-            magnitudes[i] = DSPMath.clampedDB(sqrtf(power[i]))
+        magnitudes[0] = DSPMath.clampedDB(abs(real[0]) / (2 * coherentGain))
+        if halfLength > 1 {
+            for bin in 1..<halfLength {
+                magnitudes[bin] = DSPMath.clampedDB(hypotf(real[bin], imag[bin]) / coherentGain)
+            }
         }
         return magnitudes
     }
@@ -108,24 +91,45 @@ public final class FFT {
         return Float(bin) * sampleRate / Float(length)
     }
 
-    private func applyWindow(of type: WindowType, into out: inout [Float]) {
-        let n = length
-        switch type {
-        case .hann:
-            vDSP_hann_window(&out, vDSP_Length(n), Int32(vDSP_HANN_NORM))
-        case .hamming:
-            vDSP_hamm_window(&out, vDSP_Length(n), Int32(vDSP_HANN_NORM))
-        case .blackmanHarris:
-            for i in 0..<n {
-                let x = Float(i) / Float(n - 1)
-                let a0: Float = 0.35875
-                let a1: Float = 0.48829
-                let a2: Float = 0.14128
-                let a3: Float = 0.01168
-                out[i] = a0
-                    - a1 * cosf(2 * .pi * x)
-                    + a2 * cosf(4 * .pi * x)
-                    - a3 * cosf(6 * .pi * x)
+    private func transform(_ input: UnsafeBufferPointer<Float>) -> ([Float], [Float]) {
+        var real = [Float](repeating: 0, count: halfLength)
+        var imag = [Float](repeating: 0, count: halfLength)
+        for i in 0..<length {
+            let value = input[i] * window[i]
+            if i.isMultiple(of: 2) {
+                real[i / 2] = value
+            } else {
+                imag[i / 2] = value
+            }
+        }
+
+        real.withUnsafeMutableBufferPointer { rp in
+            imag.withUnsafeMutableBufferPointer { ip in
+                var split = DSPSplitComplex(realp: rp.baseAddress!, imagp: ip.baseAddress!)
+                vDSP_fft_zrip(fftSetup, &split, 1, log2n, FFTDirection(kFFTDirection_Forward))
+            }
+        }
+        return (real, imag)
+    }
+
+    private static func makeWindow(_ type: WindowType, into output: inout [Float]) {
+        let n = output.count
+        guard n > 1 else {
+            if n == 1 { output[0] = 1 }
+            return
+        }
+        for i in 0..<n {
+            let phase = 2 * Float.pi * Float(i) / Float(n)
+            switch type {
+            case .hann:
+                output[i] = 0.5 * (1 - cosf(phase))
+            case .hamming:
+                output[i] = 0.54 - 0.46 * cosf(phase)
+            case .blackmanHarris:
+                output[i] = 0.35875
+                    - 0.48829 * cosf(phase)
+                    + 0.14128 * cosf(2 * phase)
+                    - 0.01168 * cosf(3 * phase)
             }
         }
     }

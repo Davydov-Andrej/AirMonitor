@@ -6,10 +6,6 @@ import yaCore
 /// Отрисовщики графиков на CGContext (вне SwiftUI-обновлений).
 /// Вызываются из CADisplayLink (LiveCanvas) — каждые ~16 мс, независимо от
 /// активности окна. Данные захватываются при создании drawer'а.
-/// Контекст битмапа, в котором идёт отрисовка текста (ставится в frameTick на DL-потоке).
-nonisolated(unsafe) var currentDrawContext: CGContext?
-nonisolated(unsafe) let currentDrawContextLock = NSLock()
-
 enum CGChart {
 
     // MARK: - Спектр (АЧХ)
@@ -28,8 +24,8 @@ enum CGChart {
             let path = CGMutablePath()
             path.move(to: CGPoint(x: 0, y: y))
             path.addLine(to: CGPoint(x: size.width, y: y))
-            stroke(ctx, path, color: .gray, width: 0.5, alpha: 0.15)
-            drawText(NSAttributedString(string: "\(db)", attributes: labelAttrs),
+            stroke(ctx, path, color: .separatorColor, width: 0.5, alpha: 0.15)
+            drawText(ctx: ctx, NSAttributedString(string: "\(db)", attributes: labelAttrs),
                      at: CGPoint(x: 4, y: y + 1), height: size.height)
         }
         for (freq, label) in freqLabels {
@@ -37,9 +33,10 @@ enum CGChart {
             let path = CGMutablePath()
             path.move(to: CGPoint(x: fx, y: 0))
             path.addLine(to: CGPoint(x: fx, y: size.height))
-            stroke(ctx, path, color: .gray, width: 0.5, alpha: 0.12)
-            drawText(NSAttributedString(string: label, attributes: labelAttrs),
-                     at: CGPoint(x: fx + 3, y: size.height - 12), height: size.height)
+            stroke(ctx, path, color: .separatorColor, width: 0.5, alpha: 0.12)
+            let text = NSAttributedString(string: label, attributes: labelAttrs)
+            let textX = max(2, min(size.width - text.size().width - 2, fx - text.size().width / 2))
+            drawText(ctx: ctx, text, at: CGPoint(x: textX, y: size.height - 12), height: size.height)
         }
     }
 
@@ -67,7 +64,7 @@ enum CGChart {
                 .font: NSFont.systemFont(ofSize: 7),
                 .foregroundColor: NSColor.tertiaryLabelColor,
             ]
-            drawText(NSAttributedString(string: "дБFS", attributes: unitAttrs),
+            drawText(ctx: ctx, NSAttributedString(string: "дБFS", attributes: unitAttrs),
                      at: CGPoint(x: 4, y: 2), height: size.height)
         }
     }
@@ -91,62 +88,54 @@ enum CGChart {
                 let path = CGMutablePath()
                 path.move(to: CGPoint(x: 0, y: y))
                 path.addLine(to: CGPoint(x: size.width, y: y))
-                stroke(ctx, path, color: .gray, width: 0.5, alpha: 0.15)
-                drawText(NSAttributedString(string: "\(Int(lu)) LU", attributes: labelAttrs),
+                stroke(ctx, path, color: .separatorColor, width: 0.5, alpha: 0.15)
+                drawText(ctx: ctx, NSAttributedString(string: "\(Int(lu)) LUFS", attributes: labelAttrs),
                          at: CGPoint(x: 3, y: y + 1), height: size.height)
                 lu += 10
             }
-            // Горизонтальные подписи: время (окно 30 с, справа «сейчас»)
+            // Горизонтальная ось: возраст данных, справа «сейчас».
             let windowSeconds = 30.0
-            let timeLabels: [(Double, String)] = [(5, "−5 с"), (10, "−10 с"), (15, "−15 с"), (20, "−20 с"), (25, "−25 с"), (29.5, "сейчас")]
+            let timeLabels: [(Double, String)] = [
+                (25, "−25 с"), (20, "−20 с"), (15, "−15 с"),
+                (10, "−10 с"), (5, "−5 с"), (0, "сейчас")
+            ]
             for (sec, label) in timeLabels {
                 let x = size.width * CGFloat((windowSeconds - sec) / windowSeconds)
-                var tick = CGMutablePath()
+                let tick = CGMutablePath()
                 tick.move(to: CGPoint(x: x, y: 0))
                 tick.addLine(to: CGPoint(x: x, y: size.height))
-                stroke(ctx, tick, color: .gray, width: 0.5, alpha: 0.1)
-                drawText(NSAttributedString(string: label, attributes: labelAttrs),
-                         at: CGPoint(x: x - 18, y: size.height - 12), height: size.height)
+                stroke(ctx, tick, color: .separatorColor, width: 0.5, alpha: 0.1)
+                let text = NSAttributedString(string: label, attributes: labelAttrs)
+                let textX = max(2, min(size.width - text.size().width - 2, x - text.size().width / 2))
+                drawText(ctx: ctx, text, at: CGPoint(x: textX, y: size.height - 12), height: size.height)
             }
             let ty = yPos(target, height: size.height)
             let targetPath = CGMutablePath()
             targetPath.move(to: CGPoint(x: 0, y: ty))
             targetPath.addLine(to: CGPoint(x: size.width, y: ty))
             stroke(ctx, targetPath, color: .systemGreen, width: 1, alpha: 0.45, dash: [4, 3])
-            // Легенда целевой линии
-            drawText(NSAttributedString(string: "цель −23 LUFS (EBU R128)", attributes: labelAttrs),
-                     at: CGPoint(x: size.width - 130, y: ty + 2), height: size.height)
+            // Это ориентир на временном графике M/S; цель EBU R 128
+            // относится к Integrated loudness, а не к каждому мгновению.
+            let reference = NSAttributedString(string: "ориентир −23 LUFS", attributes: labelAttrs)
+            drawText(ctx: ctx, reference,
+                     at: CGPoint(x: max(3, size.width - reference.size().width - 4), y: ty + 2),
+                     height: size.height)
         }
     }
 
-    static func spectrumDrawer(holder: BusSnapshotHolder) -> (CGContext, CGSize, CGPoint?, String) -> Void {
+    static func spectrumDrawer(holder: BusSnapshotHolder, isDark: Bool = false) -> (CGContext, CGSize, CGPoint?, String) -> Void {
         // Данные резолвятся КАЖДЫЙ кадр: holder живой, snapshot обновляется DSP-потоком.
-        let drawer = spectrumDrawerBuilder()
-        return { ctx, size, hover, _ in
+        let drawer = spectrumDrawerBuilder(isDark: isDark)
+        return { ctx, size, _, _ in
             let snapshot = holder.snapshot
             let channel = snapshot?.mono ?? snapshot?.channels.first
             drawer(ctx, size, channel?.fineCurve ?? [], channel?.rtaBands ?? [])
-            if let hover {
-                let pts = channel?.fineCurve ?? []
-                let logMin = log10f(20), logMax = log10f(20000)
-                let t = Float(hover.x / size.width)
-                let freq = powf(10, logMin + t * (logMax - logMin))
-                if let nearest = pts.min(by: { abs($0.frequency - freq) < abs($1.frequency - freq) }) {
-                    drawHoverBadge(ctx: ctx, size: size, at: hover,
-                                   text: String(format: "%.0f Гц: %.1f дБ", nearest.frequency, nearest.magnitudeDB))
-                }
-            }
         }
     }
 
-    static func spectrumDrawerBuilder() -> (CGContext, CGSize, [SpectrumPoint], [RTABand]) -> Void {
+    static func spectrumDrawerBuilder(isDark: Bool = false) -> (CGContext, CGSize, [SpectrumPoint], [RTABand]) -> Void {
         let minDB: Float = -90
         let maxDB: Float = 10
-        let dbLabels = [10, -2, -14, -26, -38, -50, -62, -74, -86]
-        let freqLabels: [(Float, String)] = [
-            (63, "63"), (250, "250"), (1000, "1k"), (4000, "4k"), (16000, "16k")
-        ]
-
         func xPos(_ freq: Float, width: CGFloat) -> CGFloat {
             let t = (log10f(max(freq, 20)) - log10f(20)) / (log10f(20000) - log10f(20))
             return CGFloat(max(0, min(1, t))) * width
@@ -157,9 +146,6 @@ enum CGChart {
         }
 
         return { ctx, size, fine, bands in
-            drawGrid(ctx: ctx, size: size, dbLabels: dbLabels, freqLabels: freqLabels,
-                     xPos: xPos, yPos: yPos)
-
             // Октавные полосы + пик-холд
             if !bands.isEmpty {
                 let slot = size.width / CGFloat(bands.count)
@@ -167,11 +153,11 @@ enum CGChart {
                     let x = CGFloat(band.id) * slot
                     let h = yPos(band.levelDB, height: size.height)
                     let rect = CGRect(x: x + 1, y: 0, width: slot - 2, height: h)
-                    fill(ctx, CGPath(rect: rect, transform: nil), color: .controlAccentColor, alpha: 0.18)
+                    fill(ctx, CGPath(rect: rect, transform: nil), color: .controlAccentColor, alpha: isDark ? 0.24 : 0.18)
                     if band.peakDB > minDB {
                         let ph = yPos(band.peakDB, height: size.height)
                         let peak = CGRect(x: x + 1, y: ph, width: slot - 2, height: 1.5)
-                        fill(ctx, CGPath(rect: peak, transform: nil), color: .labelColor, alpha: 0.4)
+                        fill(ctx, CGPath(rect: peak, transform: nil), color: .labelColor, alpha: isDark ? 0.48 : 0.4)
                     }
                 }
             }
@@ -191,9 +177,9 @@ enum CGChart {
 
     // MARK: - Громкость (история)
 
-    static func loudnessDrawer(holder: BusSnapshotHolder, isStereo: Bool) -> (CGContext, CGSize, CGPoint?, String) -> Void {
-        let inner = loudnessDrawerBuilder()
-        return { ctx, size, hover, _ in
+    static func loudnessDrawer(holder: BusSnapshotHolder, isStereo: Bool, isDark: Bool = false) -> (CGContext, CGSize, CGPoint?, String) -> Void {
+        let inner = loudnessDrawerBuilder(isDark: isDark)
+        return { ctx, size, _, _ in
             let snapshot = holder.snapshot
             let mono = isStereo ? (snapshot?.mono ?? snapshot?.channels.first) : snapshot?.channels.first
             let history = mono?.loudnessHistory ?? []
@@ -201,55 +187,13 @@ enum CGChart {
                   history,
                   isStereo ? snapshot?.channels.first?.loudnessHistory ?? [] : [],
                   isStereo ? snapshot?.channels.dropFirst().first?.loudnessHistory ?? [] : [])
-            if let hover, !history.isEmpty {
-                let capacity = 300  // 30 с × 10 Гц
-                let idx = Int((hover.x / size.width) * CGFloat(capacity))
-                if idx >= 0, idx < history.count {
-                    let p = history[idx]
-                    let text = p.momentary.isFinite
-                        ? String(format: "M %.1f  S %.1f LUFS", p.momentary, p.shortTerm)
-                        : "нет сигнала"
-                    drawHoverBadge(ctx: ctx, size: size, at: hover, text: text)
-                }
-            }
         }
     }
 
-    /// Плашка hover-подсказки (координаты drawer'а — флипнутые SwiftUI-стилю).
-    static func drawHoverBadge(ctx: CGContext, size: CGSize, at point: CGPoint, text: String) {
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .medium),
-            .foregroundColor: NSColor.labelColor,
-        ]
-        let str = NSAttributedString(string: "  " + text + "  ", attributes: attrs)
-        let textSize = str.boundingRect(with: size, options: [.usesLineFragmentOrigin]).size
-        var x = point.x + 12
-        var y = point.y + 10
-        if x + textSize.width > size.width { x = size.width - textSize.width - 2 }
-        if y + textSize.height > size.height { y = point.y - textSize.height - 6 }
-        let rect = CGRect(x: x, y: size.height - y - textSize.height, width: textSize.width, height: textSize.height)
-        ctx.saveGState()
-        ctx.setFillColor(NSColor.windowBackgroundColor.withAlphaComponent(0.88).cgColor)
-        ctx.fill(rect)
-        ctx.setStrokeColor(NSColor.separatorColor.cgColor)
-        ctx.setLineWidth(0.5)
-        ctx.addPath(CGPath(rect: rect, transform: nil))
-        ctx.strokePath()
-        ctx.restoreGState()
-        // Текст через CoreText (AppKit str.draw не работает без NSGraphicsContext)
-        let line = CTLineCreateWithAttributedString(str)
-        ctx.saveGState()
-        ctx.translateBy(x: rect.minX, y: rect.maxY)
-        ctx.scaleBy(x: 1, y: -1)
-        ctx.textPosition = CGPoint.zero
-        CTLineDraw(line, ctx)
-        ctx.restoreGState()
-    }
-
-    static func loudnessDrawerBuilder() -> (CGContext, CGSize, [LoudnessMeter.HistoryPoint], [LoudnessMeter.HistoryPoint], [LoudnessMeter.HistoryPoint]) -> Void {
+    static func loudnessDrawerBuilder(isDark: Bool = false) -> (CGContext, CGSize, [LoudnessMeter.HistoryPoint], [LoudnessMeter.HistoryPoint], [LoudnessMeter.HistoryPoint]) -> Void {
         let minLU: Float = -40
         let maxLU: Float = 0
-        let stepHz = 10.0
+        let stepHz = 5.0 // LoudnessMeter adds one history point every 200 ms.
 
         func yPos(_ lu: Float, height: CGFloat) -> CGFloat {
             let floorLU = minLU + 1
@@ -276,7 +220,7 @@ enum CGChart {
                     path.addLine(to: CGPoint(x: x, y: y))
                 }
             }
-            if closeToBottom, let last = points.last {
+            if closeToBottom, !points.isEmpty {
                 path.addLine(to: CGPoint(x: (offset + CGFloat(points.count - 1)) * stepX, y: height))
                 path.closeSubpath()
             }
@@ -284,33 +228,7 @@ enum CGChart {
         }
 
         return { ctx, size, monoHistory, leftHistory, rightHistory in
-            let target: Float = -23
             let windowSeconds: Double = 30
-            let labelAttrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 8),
-                .foregroundColor: NSColor.secondaryLabelColor,
-            ]
-
-            // Сетка + подписи LU
-            var lu = minLU + 10
-            while lu < maxLU {
-                let y = yPos(lu, height: size.height)
-                let path = CGMutablePath()
-                path.move(to: CGPoint(x: 0, y: y))
-                path.addLine(to: CGPoint(x: size.width, y: y))
-                stroke(ctx, path, color: .gray, width: 0.5, alpha: 0.15)
-                drawText(NSAttributedString(string: "\(Int(lu))", attributes: labelAttrs),
-                         at: CGPoint(x: 3, y: y + 1), height: size.height)
-                lu += 10
-            }
-
-            // Целевая линия
-            let ty = yPos(target, height: size.height)
-            let targetPath = CGMutablePath()
-            targetPath.move(to: CGPoint(x: 0, y: ty))
-            targetPath.addLine(to: CGPoint(x: size.width, y: ty))
-            stroke(ctx, targetPath, color: .systemGreen, width: 1, alpha: 0.45, dash: [4, 3])
-
             let capacity = Int(windowSeconds * stepHz)
             let isStereo = !leftHistory.isEmpty || !rightHistory.isEmpty
 
@@ -318,7 +236,7 @@ enum CGChart {
             if isStereo {
                 let fillPath = seriesPath(points: monoHistory, capacity: capacity, keyPath: { $0.shortTerm },
                                           width: size.width, height: size.height, closeToBottom: true)
-                fill(ctx, fillPath, color: .systemBlue, alpha: 0.16)
+                fill(ctx, fillPath, color: .systemBlue, alpha: isDark ? 0.23 : 0.16)
                 let left = seriesPath(points: leftHistory, capacity: capacity, keyPath: { $0.momentary },
                                       width: size.width, height: size.height, closeToBottom: false)
                 stroke(ctx, left, color: .systemRed, width: 1.2, roundJoin: true)
@@ -331,7 +249,7 @@ enum CGChart {
             } else {
                 let fillPath = seriesPath(points: monoHistory, capacity: capacity, keyPath: { $0.shortTerm },
                                           width: size.width, height: size.height, closeToBottom: true)
-                fill(ctx, fillPath, color: .systemBlue, alpha: 0.16)
+                fill(ctx, fillPath, color: .systemBlue, alpha: isDark ? 0.23 : 0.16)
                 let line = seriesPath(points: monoHistory, capacity: capacity, keyPath: { $0.momentary },
                                       width: size.width, height: size.height, closeToBottom: false)
                 stroke(ctx, line, color: .systemBlue, width: 1.2, roundJoin: true)
@@ -343,22 +261,36 @@ enum CGChart {
 
     static func balanceDrawer(holder: BusSnapshotHolder) -> (CGContext, CGSize, CGPoint?, String) -> Void {
         let inner = balanceDrawerBuilder()
-        return { ctx, size, hover, _ in
+        return { ctx, size, _, _ in
             let snapshot = holder.snapshot
             let channel = snapshot?.mono ?? snapshot?.channels.first
             inner(ctx, size, channel?.tonalBalances ?? [], channel?.tonalBalances.isEmpty == false)
-            if let hover {
-                let balances = channel?.tonalBalances ?? []
-                if !balances.isEmpty {
-                    let slot = size.width / CGFloat(balances.count)
-                    let idx = Int(hover.x / slot)
-                    if idx >= 0, idx < balances.count {
-                        let b = balances[idx]
-                        drawHoverBadge(ctx: ctx, size: size, at: hover,
-                                       text: String(format: "%s: %+.1f дБ (реф. %.0f дБ)",
-                                                    b.band.localizedName, b.deviationDB, b.energyDB))
-                    }
-                }
+        }
+    }
+
+    static func balanceBackground() -> (CGContext, CGSize) -> Void {
+        let labels = InstrumentBand.allCases.map(\.rawName)
+        return { ctx, size in
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 7),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]
+            let slot = size.width / CGFloat(max(labels.count, 1))
+            for (i, label) in labels.enumerated() {
+                let text = NSAttributedString(string: label, attributes: attrs)
+                let width = text.size().width
+                drawText(ctx: ctx, text,
+                         at: CGPoint(x: CGFloat(i) * slot + (slot - width) / 2, y: 2),
+                         height: size.height)
+            }
+            for (db, label) in [(20, "+20"), (0, "0"), (-20, "−20")] {
+                let y = size.height * (1 - CGFloat(db + 20) / 40) * 0.92 + size.height * 0.04
+                let path = CGMutablePath()
+                path.move(to: CGPoint(x: 0, y: y))
+                path.addLine(to: CGPoint(x: size.width, y: y))
+                stroke(ctx, path, color: .separatorColor, width: 0.5, alpha: db == 0 ? 0.18 : 0.1)
+                drawText(ctx: ctx, NSAttributedString(string: "\(label) дБ", attributes: attrs),
+                         at: CGPoint(x: 3, y: y + 1), height: size.height)
             }
         }
     }
@@ -372,26 +304,18 @@ enum CGChart {
         }
 
         return { ctx, size, balances, hasSignal in
-            let labelAttrs0: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 9),
-                .foregroundColor: NSColor.tertiaryLabelColor,
-            ]
             guard !balances.isEmpty, hasSignal else {
-                drawText(NSAttributedString(string: "нет сигнала", attributes: labelAttrs0),
-                         at: CGPoint(x: size.width / 2 - 30, y: size.height / 2), height: size.height)
                 return
             }
 
-            let deviations = balances.map { $0.deviationDB }
-            let mean = deviations.reduce(0, +) / Float(deviations.count)
-
-            // Целевая зона ±4 дБ
-            let upperY = yPos(mean - 4, height: size.height)
-            let lowerY = yPos(mean + 4, height: size.height)
+            // Отклонения уже рассчитаны относительно референса, поэтому
+            // нулевая линия и допуск ±4 дБ должны быть центрированы на 0.
+            let upperY = yPos(4, height: size.height)
+            let lowerY = yPos(-4, height: size.height)
             let zone = CGRect(x: 0, y: upperY, width: size.width, height: lowerY - upperY)
-            fill(ctx, CGPath(rect: zone, transform: nil), color: .systemGreen, alpha: 0.12)
+            fill(ctx, CGPath(rect: zone, transform: nil), color: .systemGreen, alpha: 0.16)
 
-            let zeroY = yPos(mean, height: size.height)
+            let zeroY = yPos(0, height: size.height)
             let refLine = CGMutablePath()
             refLine.move(to: CGPoint(x: 0, y: zeroY))
             refLine.addLine(to: CGPoint(x: size.width, y: zeroY))
@@ -416,34 +340,20 @@ enum CGChart {
                      color: balance.deviationDB > 0 ? .systemRed : .systemOrange, alpha: 1)
             }
 
-            // Подписи полос
-            let labelAttrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 7),
-                .foregroundColor: NSColor.secondaryLabelColor,
-            ]
-            for (i, balance) in balances.enumerated() {
-                let x = CGFloat(i) * slot + slot / 2
-                let str = NSAttributedString(string: balance.band.rawName, attributes: labelAttrs)
-                let b = str.boundingRect(with: size, options: [.usesLineFragmentOrigin])
-                drawText(str, at: CGPoint(x: x - b.width / 2, y: 2), height: size.height)
-            }
         }
     }
 
     // MARK: - Примитивы
 
-    /// Текст: рисуется в перевернутых координатах (двойной флип локально).
+    /// Текст: drawer получает координаты сверху вниз; локально переворачиваем
+    /// только глифы, сохраняя исходную позицию подписи.
     /// Текст на CGContext через CoreText: работает на любом потоке,
     /// без NSGraphicsContext (которого нет на display-link битмапе).
     /// Координаты: SwiftUI-стиль (y сверху) — рисуем с локальным флипом.
-    private static func drawText(_ str: NSAttributedString, at point: CGPoint, height: CGFloat) {
+    private static func drawText(ctx: CGContext, _ str: NSAttributedString, at point: CGPoint, height _: CGFloat) {
         let line = CTLineCreateWithAttributedString(str)
-        currentDrawContextLock.lock()
-        let ctx = currentDrawContext
-        currentDrawContextLock.unlock()
-        guard let ctx else { return }
         ctx.saveGState()
-        ctx.translateBy(x: point.x, y: height - point.y)
+        ctx.translateBy(x: point.x, y: point.y)
         ctx.scaleBy(x: 1, y: -1)
         ctx.textPosition = CGPoint.zero
         CTLineDraw(line, ctx)

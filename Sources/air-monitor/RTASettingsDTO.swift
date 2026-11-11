@@ -37,7 +37,8 @@ struct RTASettingsDTO: Codable {
             autoDowngrade: autoDowngrade,
             shortTermSeconds: shortTermSeconds,
             neighborSmoothing: neighborSmoothing,
-            loudnessSmoothing: loudnessSmoothing
+            loudnessSmoothing: loudnessSmoothing,
+            numberSmoothing: numberSmoothing
         )
     }
 }

@@ -1,8 +1,10 @@
 import SwiftUI
+import AppKit
 import yaCore
 
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(spacing: 0) {
@@ -16,14 +18,25 @@ struct ContentView: View {
                 SpectrumView()
                     .tabItem { Label("Спектр (АЧХ)", systemImage: "chart.bar.xaxis") }
                 BalanceView()
-                    .tabItem { Label("Баланс микса", systemImage: "slider.horizontal.3") }
+                    .tabItem {
+                        VStack(spacing: 1) {
+                            Label("Баланс микса", systemImage: "slider.horizontal.3")
+                            Text("В разработке")
+                                .font(.system(size: 7, weight: .medium))
+                                .foregroundStyle(.orange)
+                        }
+                    }
                 SettingsView()
-                    .tabItem { Label("Настройки", systemImage: "gearshape") }
+                    .tabItem { Label("О приложении", systemImage: "info.circle") }
             }
         }
         .onAppear {
             model.refreshDevices()
             model.startObservingDeviceChanges()
+            updateDockIcon(for: colorScheme)
+        }
+        .onChange(of: colorScheme) { _, newScheme in
+            updateDockIcon(for: newScheme)
         }
         .onDisappear {
             model.stopObservingDeviceChanges()
@@ -46,6 +59,19 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 8)
+            Menu {
+                Picker("Тема приложения", selection: $model.appTheme) {
+                    ForEach(AppTheme.allCases) { theme in
+                        Text(theme.title).tag(theme)
+                    }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Image(systemName: "circle.lefthalf.filled")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize(horizontal: true, vertical: false)
+            .help("Тема: как в системе, светлая или тёмная")
             Spacer()
             if model.isCapturing {
                 HStack(spacing: 6) {
@@ -78,6 +104,13 @@ struct ContentView: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
+    }
+
+    private func updateDockIcon(for scheme: ColorScheme) {
+        let resource = scheme == .dark ? "AirMonitor_black" : "AirMonitor_white"
+        guard let url = Bundle.main.url(forResource: resource, withExtension: "png"),
+              let image = NSImage(contentsOf: url) else { return }
+        NSApp.applicationIconImage = image
     }
 
     private var devicesSummary: String {

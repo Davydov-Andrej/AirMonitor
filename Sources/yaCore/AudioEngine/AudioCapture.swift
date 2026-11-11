@@ -6,11 +6,21 @@ func log(_ message: String) {
     FileHandle.standardError.write(("[AirMonitor] " + message + "\n").data(using: .utf8)!)
 }
 
+private struct DeferredAudioStorage: @unchecked Sendable {
+    let bufferList: UnsafeMutableRawPointer?
+    let channels: [UnsafeMutableRawPointer]
+
+    func release() {
+        bufferList?.deallocate()
+        for buffer in channels { buffer.deallocate() }
+    }
+}
+
 /// Захват с выбранного устройства через AUHAL (CoreAudio). В отличие от
 /// AVAudioEngine.inputNode (который всегда читает системный вход по умолчанию),
 /// AUHAL позволяет явно привязать конкретное устройство через
 /// kAudioOutputUnitProperty_CurrentDevice и получить все его входные каналы.
-final class AudioCaptureImpl {
+final class AudioCaptureImpl: @unchecked Sendable {
 
     private let spec: AudioSourceSpec
     private let lock = NSLock()
@@ -74,13 +84,27 @@ final class AudioCaptureImpl {
         lock.lock()
         defer { lock.unlock() }
         guard !isRunning else { return false }
+        disconnectNotified = false
+        disconnectErrorCount = 0
 
         guard let unit = makeInputUnit() else {
             log("AUHAL: не удалось создать input unit")
             return false
         }
 
-        bufferFrames = 1024
+        // AudioUnit может отдавать срезы больше 1024 (особенно при смене
+        // устройства/частоты). Запрашиваем поддерживаемый размер до Initialize
+        // и заранее выделяем буферы с запасом, чтобы callback не терял кадр.
+        var requestedFrames: UInt32 = 4096
+        let maxFramesStatus = AudioUnitSetProperty(
+            unit,
+            kAudioUnitProperty_MaximumFramesPerSlice,
+            kAudioUnitScope_Global,
+            0,
+            &requestedFrames,
+            UInt32(MemoryLayout<UInt32>.size)
+        )
+        bufferFrames = max(1024, maxFramesStatus == noErr ? Int(requestedFrames) : 1024)
 
         var storage: UnsafeMutableRawPointer?
         var buffers: [UnsafeMutableRawPointer] = []
@@ -123,14 +147,17 @@ final class AudioCaptureImpl {
             return false
         }
 
+        // Сохранить unit до старта: AUHAL может вызвать render callback
+        // сразу из AudioOutputUnitStart.
+        audioUnit = unit
         let startStatus = AudioOutputUnitStart(unit)
         guard startStatus == noErr else {
+            audioUnit = nil
             teardown(unit: unit)
             log("AUHAL: AudioOutputUnitStart \(startStatus)")
             return false
         }
 
-        audioUnit = unit
         isRunning = true
         log("AUHAL: запущен, каналов=\(spec.inputChannels), frames=\(bufferFrames)")
         return true
@@ -188,18 +215,22 @@ final class AudioCaptureImpl {
     private var frameQueue: [Frame] = []
     private let frameQueueLock = NSLock()
     private let frameQueueLimit = 8
+    private var isDrainScheduled = false
 
     private func enqueue(frame: Frame) {
-        var dropped = false
+        var shouldScheduleDrain = false
         frameQueueLock.lock()
         if frameQueue.count >= frameQueueLimit {
             frameQueue.removeFirst()
-            dropped = true
         }
         frameQueue.append(frame)
+        if !isDrainScheduled {
+            isDrainScheduled = true
+            shouldScheduleDrain = true
+        }
         frameQueueLock.unlock()
 
-        if !dropped || frameQueue.count == 1 {
+        if shouldScheduleDrain {
             consumerQueue.async { [weak self] in
                 self?.drainQueue()
             }
@@ -210,6 +241,7 @@ final class AudioCaptureImpl {
         while true {
             frameQueueLock.lock()
             guard !frameQueue.isEmpty else {
+                isDrainScheduled = false
                 frameQueueLock.unlock()
                 return
             }
@@ -231,7 +263,15 @@ final class AudioCaptureImpl {
         guard let unit = audioUnit, let abl = context.abl else { return noErr }
         guard frames > 0, Int(frames) <= context.bufferFrames else { return noErr }
 
-        let status = AudioUnitRender(unit, actionFlags, timeStamp!, bus, frames, abl)
+        var fallbackTimeStamp = AudioTimeStamp()
+        let status: OSStatus
+        if let timeStamp {
+            status = AudioUnitRender(unit, actionFlags, timeStamp, bus, frames, abl)
+        } else {
+            status = withUnsafePointer(to: &fallbackTimeStamp) {
+                AudioUnitRender(unit, actionFlags, $0, bus, frames, abl)
+            }
+        }
         if status != noErr {
             // Устройство умерло (отключено) — сообщаем один раз.
             // -10874 = kAudioUnitErr_InvalidElement, -50 params, -10875...
@@ -251,7 +291,20 @@ final class AudioCaptureImpl {
         return noErr
     }
 
-    var onDisconnect: (() -> Void)?
+    private let onDisconnectLock = NSLock()
+    private var onDisconnectStorage: (@Sendable () -> Void)?
+    var onDisconnect: (@Sendable () -> Void)? {
+        get {
+            onDisconnectLock.lock()
+            defer { onDisconnectLock.unlock() }
+            return onDisconnectStorage
+        }
+        set {
+            onDisconnectLock.lock()
+            onDisconnectStorage = newValue
+            onDisconnectLock.unlock()
+        }
+    }
     private var disconnectNotified = false
     private var disconnectErrorCount = 0
 
@@ -273,15 +326,13 @@ final class AudioCaptureImpl {
         // УЖЕ вошедший в captureRenderCallback, мог пройти guard до stop.
         // Асинхронно освобождаем память с запасом 100 мс, чтобы любой
         // «зависший» в колбэке кадр успел дочитаться (иначе use-after-free).
-        let storageToFree = bufferListStorage
-        let buffersToFree = channelBuffers
+        let deferredStorage = DeferredAudioStorage(bufferList: bufferListStorage, channels: channelBuffers)
         bufferListStorage = nil
         channelBuffers = []
         context.abl = nil
-        if storageToFree != nil || !buffersToFree.isEmpty {
+        if deferredStorage.bufferList != nil || !deferredStorage.channels.isEmpty {
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) {
-                if let st = storageToFree { st.deallocate() }
-                for b in buffersToFree { b.deallocate() }
+                deferredStorage.release()
             }
         }
         AudioUnitUninitialize(unit)

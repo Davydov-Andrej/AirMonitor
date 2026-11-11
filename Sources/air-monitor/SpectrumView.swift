@@ -121,6 +121,7 @@ struct SpectrumView: View {
                 Label("Динамика", systemImage: "waveform.path.ecg")
             }
         }
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 

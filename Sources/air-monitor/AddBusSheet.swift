@@ -13,17 +13,33 @@ struct AddBusSheet: View {
 
             Form {
                 Section("Устройство") {
-                    Picker("Источник звука", selection: $model.draftDeviceUID) {
-                        ForEach(model.devices) { device in
-                            Text("\(device.name) (\(device.inputChannels) ch)")
-                                .tag(device.uid as String?)
+                    if model.devices.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label("Входные устройства не найдены", systemImage: "waveform.badge.exclamationmark")
+                                .font(.headline)
+                            Text("Подключите микрофон, аудиоинтерфейс или виртуальный источник (например, Loopback). Проверьте, что устройство отображается в Системных настройках → Звук → Вход.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button("Обновить список устройств") {
+                                model.refreshDevices()
+                            }
                         }
-                    }
-                    .onChange(of: model.draftDeviceUID) { _, _ in
-                        model.draftMonoChannels = []
+                        .padding(.vertical, 4)
+                    } else {
+                        Picker("Источник звука", selection: $model.draftDeviceUID) {
+                            ForEach(model.devices) { device in
+                                Text("\(device.name) (\(device.inputChannels) ch)")
+                                    .tag(device.uid as String?)
+                            }
+                        }
+                        .onChange(of: model.draftDeviceUID) { _, _ in
+                            model.draftMonoChannels = []
+                        }
                     }
                 }
 
+                if !model.devices.isEmpty {
                 Section("Режим") {
                     Picker("Режим", selection: $model.draftMode) {
                         ForEach(BusDraftMode.allCases) { mode in
@@ -59,6 +75,7 @@ struct AddBusSheet: View {
                 Section("Имя") {
                     TextField("Например: Main, Monitor, Subs…", text: $model.draftName)
                 }
+                }
             }
             .formStyle(.grouped)
 
@@ -74,10 +91,14 @@ struct AddBusSheet: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(model.devices.isEmpty)
             }
         }
         .padding()
         .frame(width: 560)
+        .onAppear {
+            model.refreshDevices()
+        }
     }
 }
 
@@ -111,7 +132,7 @@ struct MultiChannelPicker: View {
                 }
                 .padding(6)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor)))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3)))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.22)))
             }
             .buttonStyle(.plain)
 
@@ -143,7 +164,7 @@ struct MultiChannelPicker: View {
                 }
                 .frame(maxHeight: 220)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor)))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3)))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.22)))
             }
         }
     }

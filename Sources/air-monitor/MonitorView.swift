@@ -19,22 +19,27 @@ struct MonitorView: View {
                         set: { model.rtaSettings.shortTermSeconds = $0 }
                     )) {
                         Text("S: 0.4 с").tag(0.4)
-                        Text("S: 1 с (по умолчанию)").tag(1.0)
+                        Text("S: 1 с").tag(1.0)
                         Text("S: 2 с").tag(2.0)
-                        Text("S: 3 с (стандарт EBU)").tag(3.0)
+                        Text("S: 3 с (по умолчанию, стандарт EBU)").tag(3.0)
                     }
                     .pickerStyle(.inline)
                 } label: {
-                    Label("Окно S: \(sWindowLabel)", systemImage: "timer")
+                    Label("S: \(sWindowLabel) с", systemImage: "timer")
+                        .lineLimit(1)
+                        .frame(width: 92, alignment: .trailing)
                 }
+                .menuStyle(.borderedButton)
+                .frame(width: 112, alignment: .trailing)
+                .fixedSize(horizontal: true, vertical: false)
                 // Сглаживание ГРАФИКА громкости (отдельная EMA-цепочка).
                 Menu {
                     Picker("Сглаживание", selection: Binding(
                         get: { model.rtaSettings.loudnessSmoothing },
                         set: { model.rtaSettings.loudnessSmoothing = $0 }
                     )) {
-                        // Вес нового отсчёта при спаде: 1 = мгновенный спад,
-                        // меньше = длиннее хвост. Рост всегда в 4 раза быстрее спада.
+                        // Вес нового отсчёта при спаде: 1 = без сглаживания;
+                        // меньше = длиннее хвост. Рост быстрее спада, с ограничением 0.9.
                         Text("Выкл").tag(Float(1.0))
                         Text("Лёгкое (0.15)").tag(Float(0.15))
                         Text("Слабое (0.05)").tag(Float(0.05))
@@ -59,7 +64,7 @@ struct MonitorView: View {
                     Text("Максимальное (0.008)").tag(Float(0.008))
                 }
                 .pickerStyle(.inline)
-                .help("Сглаживание числовых значений M/S. Рост всегда мгновенный (пики видны сразу), спад плавный. Выключите для сверки с эталонными метрами.")
+                .help("Отдельно сглаживает отображаемые значения M/S: чем меньше значение, тем длиннее спад. Интегральная громкость и LRA от этой настройки не меняются. Выкл показывает несглаженные M/S.")
 
                 Divider()
 
@@ -77,8 +82,13 @@ struct MonitorView: View {
                 .pickerStyle(.inline)
                 .help("Если значения устойчиво расходятся с эталонным метром (Youlean и др.), выберите компенсирующий офсет. Сохраняется между запусками.")
                 } label: {
-                    Label("Сглаживание: \(smoothingLabel)", systemImage: "circle.lefthalf.filled")
+                    Label("Настройки", systemImage: "slider.horizontal.3")
+                        .lineLimit(1)
+                        .frame(width: 104, alignment: .trailing)
                 }
+                .menuStyle(.borderedButton)
+                .frame(width: 124, alignment: .trailing)
+                .fixedSize(horizontal: true, vertical: false)
             }
             if model.buses.isEmpty {
                 ContentUnavailableView("Нет шин", systemImage: "waveform", description: Text("Добавьте шину на дашборде и запустите захват"))
@@ -108,16 +118,6 @@ struct MonitorView: View {
         return v.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(v)) : String(format: "%.1f", v)
     }
 
-    private var smoothingLabel: String {
-        switch model.rtaSettings.loudnessSmoothing {
-        case 0.9...: return "выкл"
-        case 0.09..<0.9: return "лёгкое"
-        case 0.035..<0.09: return "слабое"
-        case 0.012..<0.035: return "среднее"
-        case 0.005..<0.012: return "сильное"
-        default: return "макс."
-        }
-    }
 }
 
 /// Изолированный контейнер: обновляется только при изменении снимка шины.
@@ -221,6 +221,7 @@ struct MonitorBusRow: View {
                         snapshot: summary,
                         showHints: showHints
                     )
+                    .frame(width: showHints ? 200 : 160, alignment: .leading)
                     LoudnessHistoryChart(holder: holder, isStereo: isStereo)
                     .frame(maxWidth: .infinity)
                     .frame(height: meterHeight)

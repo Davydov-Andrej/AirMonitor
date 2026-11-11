@@ -11,9 +11,9 @@ public final class StereoAnalyzerSet {
     public let rightChannelIndex: Int
     public let label: String
 
-    public private(set) var monoAnalyzer: ChannelAnalyzerSet
     public private(set) var leftAnalyzer: ChannelAnalyzerSet
     public private(set) var rightAnalyzer: ChannelAnalyzerSet
+    private let stereoLoudness: LoudnessMeter
 
     public private(set) var correlation: Float = 1.0
 
@@ -25,8 +25,7 @@ public final class StereoAnalyzerSet {
         self.label = "L \(left + 1) / R \(right + 1)"
         let labelL = "L \(left + 1)"
         let labelR = "R \(right + 1)"
-        self.monoAnalyzer = ChannelAnalyzerSet(channelIndex: -1, label: "Стерео (L+R)",
-                                               sampleRate: sampleRate, fftLength: fftLength, windowType: windowType)
+        self.stereoLoudness = LoudnessMeter(sampleRate: Double(sampleRate), channelCount: 2)
         self.leftAnalyzer = ChannelAnalyzerSet(channelIndex: left, label: labelL,
                                                sampleRate: sampleRate, fftLength: fftLength, windowType: windowType)
         self.rightAnalyzer = ChannelAnalyzerSet(channelIndex: right, label: labelR,
@@ -39,8 +38,10 @@ public final class StereoAnalyzerSet {
         self.label = label
         let labelL = "\(label) · L"
         let labelR = "\(label) · R"
-        self.monoAnalyzer = ChannelAnalyzerSet(channelIndex: -1, label: "\(label) (L+R)",
-                                               sampleRate: sampleRate, fftLength: fftLength, windowType: windowType, rtaSettings: rtaSettings)
+        self.stereoLoudness = LoudnessMeter(sampleRate: Double(sampleRate), channelCount: 2)
+        self.stereoLoudness.shortTermSeconds = rtaSettings.shortTermSeconds
+        self.stereoLoudness.displaySmoothing = rtaSettings.loudnessSmoothing
+        self.stereoLoudness.numberSmoothing = rtaSettings.numberSmoothing
         self.leftAnalyzer = ChannelAnalyzerSet(channelIndex: left, label: labelL,
                                                sampleRate: sampleRate, fftLength: fftLength, windowType: windowType, rtaSettings: rtaSettings)
         self.rightAnalyzer = ChannelAnalyzerSet(channelIndex: right, label: labelR,
@@ -78,6 +79,7 @@ public final class StereoAnalyzerSet {
         // вычисляются в snapshot() арифметически из L/R — третий FFT не нужен.
         leftAnalyzer.process(left, sampleRate: sampleRate)
         rightAnalyzer.process(right, sampleRate: sampleRate)
+        stereoLoudness.processStereo(left: left, right: right)
 
         pending = [:]
     }
@@ -85,19 +87,33 @@ public final class StereoAnalyzerSet {
     public func snapshot() -> (mono: ChannelSnapshot, left: ChannelSnapshot, right: ChannelSnapshot, correlation: Float) {
         let l = leftAnalyzer.snapshot(label: "L \(leftChannelIndex + 1)")
         let r = rightAnalyzer.snapshot(label: "R \(rightChannelIndex + 1)")
-        let m = Self.monoSnapshot(from: l, r)
+        let m = Self.monoSnapshot(from: l, r, loudness: stereoLoudness.reading(),
+                                  history: stereoLoudness.historySnapshot())
         return (m, l, r, correlation)
+    }
+
+    public func applyCalibration(_ offset: Float) {
+        stereoLoudness.calibrationOffset = offset
+    }
+
+    public func applyLoudnessSmoothing(_ alpha: Float) {
+        stereoLoudness.displaySmoothing = alpha
+    }
+
+    public func applyRTASettings(_ settings: RTASettings) {
+        stereoLoudness.shortTermSeconds = settings.shortTermSeconds
+        stereoLoudness.displaySmoothing = settings.loudnessSmoothing
+        stereoLoudness.numberSmoothing = settings.numberSmoothing
     }
 
     /// Суммарный (stereo) снимок: громкости по энергетическому среднему L/R,
     /// спектр — суммарная энергия полос. Без третьего FFT.
-    private static func monoSnapshot(from l: ChannelSnapshot, _ r: ChannelSnapshot) -> ChannelSnapshot {
-        // Громкость по BS.1770: каналы СУММИРУЮТСЯ (без /2!) — иначе -3 дБ
-        // от стандарта. Используется для M/S/I и истории.
-        func lufsSum(_ a: Float, _ b: Float) -> Float {
-            guard a.isFinite, b.isFinite else { return max(a.isFinite ? a : b, b.isFinite ? b : -Float.infinity) }
-            return 10 * log10(powf(10, a / 10) + powf(10, b / 10))
-        }
+    private static func monoSnapshot(
+        from l: ChannelSnapshot,
+        _ r: ChannelSnapshot,
+        loudness: LoudnessMeter.Reading,
+        history: [LoudnessMeter.HistoryPoint]
+    ) -> ChannelSnapshot {
         // Спектральные полосы: среднее энергии каналов (сумма удвоила бы уровень полосы).
         func energyAvg(_ a: Float, _ b: Float) -> Float {
             guard a.isFinite, b.isFinite else { return max(a.isFinite ? a : b, b.isFinite ? b : -Float.infinity) }
@@ -132,15 +148,6 @@ public final class StereoAnalyzerSet {
             balanceSpectrum.append(SpectrumPoint(id: ls.id, frequency: ls.frequency, magnitudeDB: energyAvg(ls.magnitudeDB, rs.magnitudeDB)))
         }
 
-        var history: [LoudnessMeter.HistoryPoint] = []
-        for (lh, rh) in zip(l.loudnessHistory, r.loudnessHistory) {
-            history.append(LoudnessMeter.HistoryPoint(
-                momentary: lufsSum(lh.momentary, rh.momentary),
-                shortTerm: lufsSum(lh.shortTerm, rh.shortTerm),
-                peak: max(lh.peak, rh.peak)
-            ))
-        }
-
         return ChannelSnapshot(
             id: -1,
             label: "Стерео",
@@ -149,14 +156,14 @@ public final class StereoAnalyzerSet {
             vuDB: ampAvg(l.vuDB, r.vuDB),
             truePeakDB: max(l.truePeakDB, r.truePeakDB),
             crestFactorDB: max(l.crestFactorDB, r.crestFactorDB),
-            momentaryLUFS: lufsSum(l.momentaryLUFS, r.momentaryLUFS),
-            shortTermLUFS: lufsSum(l.shortTermLUFS, r.shortTermLUFS),
+            momentaryLUFS: loudness.momentaryLUFS,
+            shortTermLUFS: loudness.shortTermLUFS,
             spectrum: balanceSpectrum,
             rtaBands: bands,
             fineCurve: fine,
             loudnessHistory: history,
-            integratedLUFS: lufsSum(l.integratedLUFS, r.integratedLUFS),
-            loudnessRangeLU: max(l.loudnessRangeLU, r.loudnessRangeLU)
+            integratedLUFS: loudness.integratedLUFS,
+            loudnessRangeLU: loudness.loudnessRangeLU
         )
     }
 }

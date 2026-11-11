@@ -12,7 +12,7 @@ struct VUMeterView: View {
         GeometryReader { geo in
             let width = geo.size.width
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.black.opacity(0.12))
+                Capsule().fill(Color.primary.opacity(0.12))
                 HStack(spacing: 0) {
                     Color.green.frame(width: width * 0.6)
                     Color.yellow.frame(width: width * 0.25)
@@ -24,7 +24,7 @@ struct VUMeterView: View {
                     .fill(fillColor)
                     .frame(width: levelFraction * width)
                 Rectangle()
-                    .fill(Color.black)
+                    .fill(Color.primary)
                     .frame(width: 2, height: geo.size.height * 0.7)
                     .offset(x: peakFraction * width)
             }

@@ -100,6 +100,10 @@ public final class AudioDataPublisher: @unchecked Sendable {
     /// Serial-очередь: вся DSP-обработка здесь, стабильный темп без гонок.
     private let analysisQueue = DispatchQueue(label: "airmonitor.analysis", qos: .userInteractive)
     private let lock = NSLock()
+    private let pendingFramesLock = NSLock()
+    private var pendingFrames: [(frame: Frame, deviceID: AudioDeviceID)] = []
+    private var isAnalysisDrainScheduled = false
+    private let pendingFramesLimit = 32
 
     /// Таймер публикации: снимки уходят в UI по часам, независимо от ритма
     /// входных кадров. Иначе пропуск кадров (дроп в bounded-очереди) = «паузы»
@@ -151,28 +155,43 @@ public final class AudioDataPublisher: @unchecked Sendable {
         guard let runtime = makeRuntime(for: config, deviceID: deviceID, rate: rate) else { return false }
         buses[config.id] = runtime
 
-        guard deviceEngine.ensureCapturing(deviceID: deviceID, rate: rate) else {
-            buses[config.id] = nil
-            return false
-        }
-        // Фильтр каналов: копируем только нужные шинам этого устройства.
-        var wanted: Set<Int> = []
-        for runtime in buses.values where runtime.deviceID == deviceID {
-            for ch in runtime.config.mode.channelIndexes {
-                wanted.insert(ch)
-            }
-        }
+        // Сначала назначаем фильтр и destination, затем запускаем AUHAL, чтобы
+        // первые callbacks уже не копировали все каналы и не теряли кадр.
+        let wanted = wantedChannelsLocked(deviceID: deviceID)
         deviceEngine.updateWantedChannels(deviceID: deviceID, channels: wanted)
         deviceEngine.setDestination(deviceID: deviceID) { [weak self] frame in
             self?.ingest(frame: frame, from: deviceID)
         }
+        guard deviceEngine.ensureCapturing(deviceID: deviceID, rate: rate) else {
+            buses[config.id] = nil
+            deviceEngine.release(deviceID: deviceID)
+            return false
+        }
+        frameActivityLock.lock()
+        lastFrameTimesByDevice[deviceID] = CFAbsoluteTimeGetCurrent()
+        frameActivityLock.unlock()
         return true
     }
 
     public func removeBus(id: BusID) {
         lock.lock()
-        defer { lock.unlock() }
-        buses[id] = nil
+        guard let removed = buses.removeValue(forKey: id) else {
+            lock.unlock()
+            return
+        }
+        let hasRemainingBuses = buses.values.contains { $0.deviceID == removed.deviceID }
+        if hasRemainingBuses {
+            deviceEngine.updateWantedChannels(
+                deviceID: removed.deviceID,
+                channels: wantedChannelsLocked(deviceID: removed.deviceID)
+            )
+        } else {
+            frameActivityLock.lock()
+            lastFrameTimesByDevice.removeValue(forKey: removed.deviceID)
+            frameActivityLock.unlock()
+            deviceEngine.release(deviceID: removed.deviceID)
+        }
+        lock.unlock()
     }
 
     public func renameBus(id: BusID, to newName: String) {
@@ -206,54 +225,56 @@ public final class AudioDataPublisher: @unchecked Sendable {
         publishTimer = timer
     }
 
-    /// Watchdog: если шины есть и захват должен идти, но публикации молчат дольше
-    /// 3 с (устройство «отвалилось» тихо, без HAL-ошибки) — перезапускаем захват.
-    private var lastFrameTime: CFAbsoluteTime = CFAbsoluteTimeGetCurrent()
-    private var watchdogRestarting = false
+    /// Время последнего входного кадра на каждом устройстве. Раздельное состояние
+    /// не позволяет активному Loopback скрыть остановившийся микрофонный вход.
+    private let frameActivityLock = NSLock()
+    private var lastFrameTimesByDevice: [AudioDeviceID: CFAbsoluteTime] = [:]
+    private var watchdogRestartingDevices: Set<AudioDeviceID> = []
 
     private func watchdogTick() {
         let now = CFAbsoluteTimeGetCurrent()
-        if frameReceivedRecently {
-            lastFrameTime = now
-            return
-        }
-        guard now - lastFrameTime > 3.0, !watchdogRestarting else { return }
-        watchdogRestarting = true
-        EngineLog.log("[watchdog] кадры молчат > 3 с — перезапуск захвата устройств")
-
         self.lock.lock()
         let devices = Array(Set(self.buses.values.map { $0.deviceID }))
-        let rates = self.deviceRates
         self.lock.unlock()
 
-        for deviceID in devices {
-            let rate = rates[deviceID] ?? 48000
+        frameActivityLock.lock()
+        let staleDevices = devices.filter {
+            now - (lastFrameTimesByDevice[$0] ?? now) > 3.0
+        }
+        frameActivityLock.unlock()
+
+        for deviceID in staleDevices where !watchdogRestartingDevices.contains(deviceID) {
+            watchdogRestartingDevices.insert(deviceID)
+            EngineLog.log("[watchdog] устройство \(deviceID): кадры молчат > 3 с — перезапуск")
             _ = self.deviceEngine.restartCapture(deviceID: deviceID)
-            _ = rate
             // Переподписка на device: setDestination снова
             let wanted = self.wantedForDevice(deviceID)
             self.deviceEngine.updateWantedChannels(deviceID: deviceID, channels: wanted)
             self.deviceEngine.setDestination(deviceID: deviceID) { [weak self] frame in
                 self?.ingest(frame: frame, from: deviceID)
             }
+            frameActivityLock.lock()
+            lastFrameTimesByDevice[deviceID] = CFAbsoluteTimeGetCurrent()
+            frameActivityLock.unlock()
+            watchdogRestartingDevices.remove(deviceID)
+            EngineLog.log("[watchdog] устройство \(deviceID): перезапуск завершён")
         }
-        lastFrameTime = CFAbsoluteTimeGetCurrent()
-        watchdogRestarting = false
-        EngineLog.log("[watchdog] перезапуск завершён")
     }
 
     private func wantedForDevice(_ deviceID: AudioDeviceID) -> Set<Int> {
         lock.lock()
         defer { lock.unlock() }
+        return wantedChannelsLocked(deviceID: deviceID)
+    }
+
+    /// Вызывается только когда `lock` удерживается.
+    private func wantedChannelsLocked(deviceID: AudioDeviceID) -> Set<Int> {
         var wanted: Set<Int> = []
         for runtime in buses.values where runtime.deviceID == deviceID {
             for ch in runtime.config.mode.channelIndexes { wanted.insert(ch) }
         }
         return wanted
     }
-
-    /// Флаг «кадры приходят»: ставится в ingest.
-    private var frameReceivedRecently = true
 
     private func stopPublishTimer() {
         publishTimer?.cancel()
@@ -303,23 +324,52 @@ public final class AudioDataPublisher: @unchecked Sendable {
     }
 
     private func ingest(frame: Frame, from deviceID: AudioDeviceID) {
-        frameReceivedRecently = true
-        // Вся обработка — на одной serial-очереди: стабильный темп, без гонок.
-        analysisQueue.async { [weak self] in
-            guard let self else { return }
-            self.lock.lock()
-            let busCopies = self.buses.values
-                .filter { $0.deviceID == deviceID }
-                .map { $0 }
-            self.lock.unlock()
-
-            let sampleRate = Float(frame.sampleRate)
-            for runtime in busCopies {
-                runtime.process(frame, sampleRate: sampleRate)
-            }
-
-            self.maybePublish()
+        frameActivityLock.lock()
+        lastFrameTimesByDevice[deviceID] = CFAbsoluteTimeGetCurrent()
+        frameActivityLock.unlock()
+        // Очередь кадров ограничена; планируется один drain, а не одна GCD-задача
+        // на callback. При перегрузке вытесняются старые кадры и память не растёт.
+        var shouldScheduleDrain = false
+        pendingFramesLock.lock()
+        if pendingFrames.count >= pendingFramesLimit {
+            pendingFrames.removeFirst()
         }
+        pendingFrames.append((frame, deviceID))
+        if !isAnalysisDrainScheduled {
+            isAnalysisDrainScheduled = true
+            shouldScheduleDrain = true
+        }
+        pendingFramesLock.unlock()
+
+        if shouldScheduleDrain {
+            analysisQueue.async { [weak self] in self?.drainAnalysisFrames() }
+        }
+    }
+
+    private func drainAnalysisFrames() {
+        // Пакеты по 8 кадров дают таймеру и настройкам возможность работать
+        // между пачками, сохраняя последовательность DSP на serial queue.
+        for _ in 0..<8 {
+            pendingFramesLock.lock()
+            guard !pendingFrames.isEmpty else {
+                isAnalysisDrainScheduled = false
+                pendingFramesLock.unlock()
+                return
+            }
+            let item = pendingFrames.removeFirst()
+            pendingFramesLock.unlock()
+
+            lock.lock()
+            let runtimes = buses.values.filter { $0.deviceID == item.deviceID }
+            lock.unlock()
+            let sampleRate = Float(item.frame.sampleRate)
+            for runtime in runtimes {
+                runtime.process(item.frame, sampleRate: sampleRate)
+            }
+            maybePublish()
+        }
+
+        analysisQueue.async { [weak self] in self?.drainAnalysisFrames() }
     }
 
     /// Задаёт порядок шин в снапшоте (вызывается из UI при перемещении).
@@ -461,7 +511,7 @@ public final class BusRuntime: @unchecked Sendable {
     /// Калибровка всех анализаторов шины.
     public func applyCalibration(_ offset: Float) {
         monoAnalyzers.values.forEach { $0.applyCalibration(offset) }
-        stereoAnalyzer?.monoAnalyzer.applyCalibration(offset)
+        stereoAnalyzer?.applyCalibration(offset)
         stereoAnalyzer?.leftAnalyzer.applyCalibration(offset)
         stereoAnalyzer?.rightAnalyzer.applyCalibration(offset)
     }
@@ -469,7 +519,7 @@ public final class BusRuntime: @unchecked Sendable {
     /// Применяет display smoothing громкости ко всем анализаторам шины.
     public func applyLoudnessSmoothing(_ alpha: Float) {
         monoAnalyzers.values.forEach { $0.applyLoudnessSmoothing(alpha) }
-        stereoAnalyzer?.monoAnalyzer.applyLoudnessSmoothing(alpha)
+        stereoAnalyzer?.applyLoudnessSmoothing(alpha)
         stereoAnalyzer?.leftAnalyzer.applyLoudnessSmoothing(alpha)
         stereoAnalyzer?.rightAnalyzer.applyLoudnessSmoothing(alpha)
     }
@@ -477,7 +527,7 @@ public final class BusRuntime: @unchecked Sendable {
     /// Применяет настройки RTA ко всем анализаторам шины немедленно.
     public func applyRTASettings(_ newSettings: RTASettings) {
         monoAnalyzers.values.forEach { $0.applyRTASettings(newSettings) }
-        stereoAnalyzer?.monoAnalyzer.applyRTASettings(newSettings)
+        stereoAnalyzer?.applyRTASettings(newSettings)
         stereoAnalyzer?.leftAnalyzer.applyRTASettings(newSettings)
         stereoAnalyzer?.rightAnalyzer.applyRTASettings(newSettings)
     }
@@ -549,7 +599,7 @@ public final class MultiDeviceCapture: @unchecked Sendable {
         onFrameByDevice[deviceID] = handler
         // Если захват уже работает — обновляем колбэк.
         captures[deviceID]?.onFrame = { [weak self] frame in
-            self?.onFrameByDevice[deviceID]?(frame)
+            self?.deliver(frame, from: deviceID)
         }
     }
 
@@ -557,6 +607,7 @@ public final class MultiDeviceCapture: @unchecked Sendable {
     public func updateWantedChannels(deviceID: AudioDeviceID, channels: Set<Int>) {
         lock.lock()
         defer { lock.unlock() }
+        wantedByDevice[deviceID] = channels
         captures[deviceID]?.wantedChannels = channels
     }
 
@@ -578,7 +629,7 @@ public final class MultiDeviceCapture: @unchecked Sendable {
         guard let capture = AudioCaptureImpl(spec: spec) else { return false }
         capture.wantedChannels = wantedByDevice[deviceID] ?? []
         capture.onFrame = { [weak self] frame in
-            self?.onFrameByDevice[deviceID]?(frame)
+            self?.deliver(frame, from: deviceID)
         }
         guard capture.start() else { return false }
         captures[deviceID] = capture
@@ -604,8 +655,9 @@ public final class MultiDeviceCapture: @unchecked Sendable {
         )
         guard let capture = AudioCaptureImpl(spec: spec) else { return false }
 
+        capture.wantedChannels = wantedByDevice[deviceID] ?? []
         capture.onFrame = { [weak self] frame in
-            self?.onFrameByDevice[deviceID]?(frame)
+            self?.deliver(frame, from: deviceID)
         }
         guard capture.start() else { return false }
         captures[deviceID] = capture
@@ -617,6 +669,16 @@ public final class MultiDeviceCapture: @unchecked Sendable {
         defer { lock.unlock() }
         captures[deviceID]?.stop()
         captures[deviceID] = nil
+        onFrameByDevice[deviceID] = nil
+        wantedByDevice[deviceID] = nil
+        lastRates[deviceID] = nil
+    }
+
+    private func deliver(_ frame: Frame, from deviceID: AudioDeviceID) {
+        lock.lock()
+        let handler = onFrameByDevice[deviceID]
+        lock.unlock()
+        handler?(frame)
     }
 
     public func allDevices() -> [AudioDeviceID] {
@@ -637,5 +699,7 @@ public final class MultiDeviceCapture: @unchecked Sendable {
         }
         captures = [:]
         onFrameByDevice = [:]
+        wantedByDevice = [:]
+        lastRates = [:]
     }
 }

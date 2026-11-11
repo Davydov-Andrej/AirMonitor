@@ -27,6 +27,9 @@ public final class DynamicsAnalyzer {
     public private(set) var fastRMS: Float = MeterFloor.dB
     private var fastState: Float = 0
 
+    private var truePeakTail: [Float] = []
+    private let truePeakCoefficients = DynamicsAnalyzer.makeTruePeakCoefficients()
+
     private var runningSumSquares: Double = 0
     private var runningCount: Int = 0
 
@@ -61,13 +64,17 @@ public final class DynamicsAnalyzer {
             rmsLevel = 20 * log10(max(rms, 1e-9))
         }
 
-        // Истинный пик: эвристика через 4x интерполяцию в окрестности максимума.
-        let interp = interpolatePeak(samples: samples)
+        // 4x oversampling с нормированным 12-tap windowed-sinc фильтром.
+        // Последние 6 сэмплов переносятся на следующий блок, чтобы межсэмпловые
+        // пики на границах callback-а считались с контекстом соседнего блока.
+        let interp = estimateTruePeak(samples: samples, samplePeak: localPeak)
         if interp > truePeak {
             truePeak = interp
         }
 
-        clipCount += samples.filter { abs($0) > 0.999 }.count
+        for sample in samples where abs(sample) > 0.999 {
+            clipCount += 1
+        }
     }
 
     public func profile() -> DynamicProfile {
@@ -88,30 +95,59 @@ public final class DynamicsAnalyzer {
         clipCount = 0
         runningSumSquares = 0
         runningCount = 0
+        fastState = 0
+        fastRMS = MeterFloor.dB
+        truePeakTail.removeAll(keepingCapacity: true)
     }
 
-    private func interpolatePeak(samples: [Float]) -> Float {
-        guard !samples.isEmpty else { return MeterFloor.dB }
-        var maxIndex = 0
-        var maxValue: Float = 0
-        for (idx, value) in samples.enumerated() {
-            let abs = abs(value)
-            if abs > maxValue {
-                maxValue = abs
-                maxIndex = idx
+    private func estimateTruePeak(samples: [Float], samplePeak: Float) -> Float {
+        var combined = truePeakTail
+        combined.append(contentsOf: samples)
+        let coefficients = truePeakCoefficients
+        var maximum = samplePeak
+
+        if combined.count >= 12 {
+            // Coefficients use offsets -5...+6 around each sample position.
+            for center in 5..<(combined.count - 6) {
+                for phase in 0..<4 {
+                    var value: Float = 0
+                    let taps = coefficients[phase]
+                    for tap in 0..<12 {
+                        value += combined[center + tap - 5] * taps[tap]
+                    }
+                    maximum = max(maximum, abs(value))
+                }
             }
         }
-        guard maxIndex > 0, maxIndex < samples.count - 1 else {
-            return 20 * log10(max(maxValue, 1e-9))
+
+        let tailCount = min(6, combined.count)
+        truePeakTail = Array(combined.suffix(tailCount))
+        return 20 * log10(max(maximum, 1e-9))
+    }
+
+    private static func makeTruePeakCoefficients() -> [[Float]] {
+        (0..<4).map { phase in
+            let fraction = Float(phase) * 0.25
+            var weights = [Float](repeating: 0, count: 12)
+            var sum: Float = 0
+            for tap in 0..<12 {
+                let offset = Float(tap - 5)
+                let distance = fraction - offset
+                let magnitude = abs(distance)
+                guard magnitude < 6 else { continue }
+                let sinc = magnitude < 1e-6
+                    ? 1
+                    : sinf(.pi * distance) / (.pi * distance)
+                let window = 0.42 + 0.5 * cosf(.pi * distance / 6)
+                    + 0.08 * cosf(2 * .pi * distance / 6)
+                let weight = sinc * window
+                weights[tap] = weight
+                sum += weight
+            }
+            if abs(sum) > 1e-8 {
+                for i in weights.indices { weights[i] /= sum }
+            }
+            return weights
         }
-        let x0 = abs(samples[maxIndex - 1])
-        let x1 = abs(samples[maxIndex])
-        let x2 = abs(samples[maxIndex + 1])
-        // Параболическая интерполяция пика между сэмплами.
-        let d = (x0 - x2) / (2 * (x0 - 2 * x1 + x2))
-        let t = max(0, min(1, 0.5 + d * 0.5))
-        let p1 = fmaxf(x0, x1)
-        let estimated = p1 / cosf(Float.pi * t / 2 - Float.pi / 2) * 1.01
-        return 20 * log10(max(estimated, 1e-9))
     }
 }

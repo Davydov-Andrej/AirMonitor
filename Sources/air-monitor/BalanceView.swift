@@ -11,6 +11,12 @@ struct BalanceView: View {
             HStack {
                 Text("Тональный баланс")
                     .font(.title2)
+                Text("В разработке")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(Color.orange.opacity(0.12)))
                 Spacer()
                 Text("Отклонения от референса по полосам")
                     .font(.caption)
@@ -44,6 +50,12 @@ struct BalanceBusCardContainer: View {
                 HStack {
                     Text(bus.config.name)
                         .font(.headline)
+                    Text("В разработке")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.orange.opacity(0.12)))
                     if !bus.isConnected {
                         Label("устройство отключено", systemImage: "cable.connector.slash")
                             .font(.caption2)
@@ -57,8 +69,7 @@ struct BalanceBusCardContainer: View {
                     }
                 }
 
-                if let snapshot = holder.snapshot {
-                    let summary = snapshot.mono ?? snapshot.channels.first
+                if holder.snapshot != nil {
                     TonalBalanceChart(holder: holder)
                     .frame(height: 180)
                 } else {
