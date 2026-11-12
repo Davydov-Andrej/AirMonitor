@@ -12,7 +12,7 @@ private struct DeferredAudioStorage: @unchecked Sendable {
 
     func release() {
         bufferList?.deallocate()
-        for buffer in channels { buffer.deallocate() }
+        for buffer in channels { free(buffer) }
     }
 }
 
@@ -189,7 +189,8 @@ final class AudioCaptureImpl: @unchecked Sendable {
             if !wanted.isEmpty && !wanted.contains(c) { continue }
             guard c < list.count else { break }
             let buffer = list[c]
-            guard let data = buffer.mData else { continue }
+            guard let data = buffer.mData,
+                  buffer.mDataByteSize >= UInt32(frames * MemoryLayout<Float>.size) else { continue }
             let src = data.assumingMemoryBound(to: Float.self)
             var samples = [Float](repeating: 0, count: frames)
             for f in 0..<frames {
@@ -262,6 +263,13 @@ final class AudioCaptureImpl: @unchecked Sendable {
     ) -> OSStatus {
         guard let unit = audioUnit, let abl = context.abl else { return noErr }
         guard frames > 0, Int(frames) <= context.bufferFrames else { return noErr }
+
+        // AudioUnitRender may replace mDataByteSize with the number of bytes
+        // produced. Reset the capacity on every call before reusing the ABL.
+        let list = UnsafeMutableAudioBufferListPointer(abl)
+        for channel in 0..<min(context.channelCount, list.count) {
+            list[channel].mDataByteSize = frames * UInt32(MemoryLayout<Float>.size)
+        }
 
         var fallbackTimeStamp = AudioTimeStamp()
         let status: OSStatus
@@ -413,6 +421,9 @@ final class AudioCaptureImpl: @unchecked Sendable {
         let list = UnsafeMutableAudioBufferListPointer(abl)
         for c in 0..<channels {
             guard let buf = malloc(byteCount) else {
+                for buffer in buffers { free(buffer) }
+                buffers.removeAll()
+                mem.deallocate()
                 return false
             }
             buffers.append(buf)

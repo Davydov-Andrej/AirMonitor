@@ -69,9 +69,6 @@ struct DashboardView: View {
             }
         }
         .padding()
-        .sheet(isPresented: $model.isPresentingAddBus) {
-            AddBusSheet()
-        }
         .sheet(isPresented: $model.isPresentingSaveScene) {
             SaveSceneSheet()
         }
@@ -172,7 +169,7 @@ struct SaveSceneSheet: View {
 /// Изолированный контейнер карточки: перерисовывается только при обновлении
 /// снимка СВОЕЙ шины, а не всего дашборда.
 struct BusDashboardCardContainer: View {
-    let bus: MonitorBus
+    @ObservedObject var bus: MonitorBus
     let holder: BusSnapshotHolder
     var cardSize: DashboardCardSize = .standard
     var autoWrapModules: Bool = true

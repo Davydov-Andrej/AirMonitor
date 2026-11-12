@@ -146,30 +146,44 @@ enum CGChart {
         }
 
         return { ctx, size, fine, bands in
-            // Октавные полосы + пик-холд
+            // Octave bands and the fine curve share one logarithmic frequency axis.
+            // Band IDs are ordinal and must not be used as x positions.
             if !bands.isEmpty {
-                let slot = size.width / CGFloat(bands.count)
-                for band in bands {
-                    let x = CGFloat(band.id) * slot
+                for (index, band) in bands.enumerated() {
+                    let leftFrequency = index == 0 ? 20 : sqrtf(bands[index - 1].centerFrequency * band.centerFrequency)
+                    let rightFrequency = index == bands.count - 1 ? 20_000 : sqrtf(band.centerFrequency * bands[index + 1].centerFrequency)
+                    let left = xPos(leftFrequency, width: size.width)
+                    let right = xPos(rightFrequency, width: size.width)
+                    let barWidth = max(0, right - left - 2)
                     let h = yPos(band.levelDB, height: size.height)
-                    let rect = CGRect(x: x + 1, y: 0, width: slot - 2, height: h)
-                    fill(ctx, CGPath(rect: rect, transform: nil), color: .controlAccentColor, alpha: isDark ? 0.24 : 0.18)
+                    let rect = CGRect(x: left + 1, y: 0, width: barWidth, height: h)
+                    fill(ctx, CGPath(rect: rect, transform: nil), color: .secondaryLabelColor, alpha: isDark ? 0.24 : 0.16)
                     if band.peakDB > minDB {
                         let ph = yPos(band.peakDB, height: size.height)
-                        let peak = CGRect(x: x + 1, y: ph, width: slot - 2, height: 1.5)
+                        let peak = CGRect(x: left + 1, y: ph, width: barWidth, height: 1.5)
                         fill(ctx, CGPath(rect: peak, transform: nil), color: .labelColor, alpha: isDark ? 0.48 : 0.4)
                     }
                 }
             }
 
-            // Тонкая кривая
+            // The colored area and its outline use the same fine-curve points.
             if fine.count > 1 {
                 let path = CGMutablePath()
+                let area = CGMutablePath()
                 for (i, point) in fine.enumerated() {
                     let p = CGPoint(x: xPos(point.frequency, width: size.width),
                                     y: yPos(point.magnitudeDB, height: size.height))
-                    if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
+                    if i == 0 {
+                        path.move(to: p)
+                        area.move(to: CGPoint(x: p.x, y: 0))
+                    } else { path.addLine(to: p) }
+                    area.addLine(to: p)
                 }
+                if let last = fine.last {
+                    area.addLine(to: CGPoint(x: xPos(last.frequency, width: size.width), y: 0))
+                    area.closeSubpath()
+                }
+                fill(ctx, area, color: .controlAccentColor, alpha: isDark ? 0.14 : 0.10)
                 stroke(ctx, path, color: .controlAccentColor, width: 1.6, roundJoin: true)
             }
         }

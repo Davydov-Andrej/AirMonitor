@@ -35,6 +35,7 @@ struct AddBusSheet: View {
                         }
                         .onChange(of: model.draftDeviceUID) { _, _ in
                             model.draftMonoChannels = []
+                            model.prepareDraftForSelectedDevice()
                         }
                     }
                 }
@@ -44,6 +45,7 @@ struct AddBusSheet: View {
                     Picker(L("Режим"), selection: $model.draftMode) {
                         ForEach(BusDraftMode.allCases) { mode in
                             Text(mode.title).tag(mode)
+                                .disabled(mode == .stereo && model.draftChannelCount < 2)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -98,6 +100,7 @@ struct AddBusSheet: View {
         .frame(width: 560)
         .onAppear {
             model.refreshDevices()
+            model.prepareDraftForSelectedDevice()
         }
     }
 }

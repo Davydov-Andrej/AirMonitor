@@ -181,8 +181,38 @@ final class AppModel: ObservableObject {
                 ?? devices.first?.uid
         }
 
+        repairBusesWithUnavailableChannels()
+
         // Дисконнект/реконнект: обновляем состояние шин и пробуем автореконнект.
         updateBusConnectionStates()
+    }
+
+    /// Older scenes could contain a stereo bus on a one-channel device. Repair
+    /// those configurations as soon as the device is known, including on launch.
+    private func repairBusesWithUnavailableChannels() {
+        let channelCounts = Dictionary(uniqueKeysWithValues: devices.map { ($0.uid, $0.inputChannels) })
+        var changed = false
+        for bus in buses {
+            guard let count = channelCounts[bus.config.deviceUID], count > 0 else { continue }
+            var config = bus.config
+            switch config.mode {
+            case .stereo(let left, let right):
+                if count == 1 {
+                    config.mode = .mono(channels: [0])
+                } else if left == right || !(0..<count).contains(left) || !(0..<count).contains(right) {
+                    config.mode = .stereo(left: 0, right: 1)
+                }
+            case .mono(let channels):
+                let valid = channels.filter { (0..<count).contains($0) }
+                if valid != channels { config.mode = .mono(channels: valid.isEmpty ? [0] : valid) }
+            }
+            guard config.mode != bus.config.mode else { continue }
+            if isCapturing { publisher?.removeBus(id: bus.id) }
+            bus.config = config
+            if isCapturing { _ = publisher?.addBus(config) }
+            changed = true
+        }
+        if changed { autosaveCurrentScene() }
     }
 
     /// Помечает шины с отсутствующим устройством и автоматически
@@ -260,7 +290,26 @@ final class AppModel: ObservableObject {
         if case .mono(let ch) = bus.config.mode {
             draftMonoChannels = Set(ch)
         }
+        prepareDraftForSelectedDevice()
         isPresentingAddBus = true
+    }
+
+    /// A one-channel input cannot supply a stereo pair. Keep the draft valid
+    /// when the selected device changes or an old scene contains invalid indexes.
+    func prepareDraftForSelectedDevice() {
+        let count = draftChannelCount
+        guard count > 0 else { return }
+        draftMonoChannels = Set(draftMonoChannels.filter { $0 >= 0 && $0 < count })
+        if count == 1 {
+            draftMode = .mono
+            draftMonoChannels = [0]
+        } else {
+            if draftLeft < 0 || draftLeft >= count { draftLeft = 0 }
+            if draftRight < 0 || draftRight >= count || draftRight == draftLeft {
+                draftRight = draftLeft == 0 ? 1 : 0
+            }
+            if draftMode == .mono && draftMonoChannels.isEmpty { draftMonoChannels = [0] }
+        }
     }
 
     /// Применить черновик: создать новую шину или обновить существующую.
@@ -274,13 +323,20 @@ final class AppModel: ObservableObject {
         let mode: BusMode
         switch draftMode {
         case .stereo:
+            guard device.inputChannels >= 2,
+                  (0..<device.inputChannels).contains(draftLeft),
+                  (0..<device.inputChannels).contains(draftRight) else {
+                errorMessage = L("Для стерео нужны два доступных входных канала")
+                return
+            }
             guard draftLeft != draftRight else {
                 errorMessage = L("Для стерео выберите два разных канала")
                 return
             }
             mode = .stereo(left: draftLeft, right: draftRight)
         case .mono:
-            guard !draftMonoChannels.isEmpty else {
+            guard !draftMonoChannels.isEmpty,
+                  draftMonoChannels.allSatisfy({ (0..<device.inputChannels).contains($0) }) else {
                 errorMessage = L("Выберите хотя бы один канал")
                 return
             }
@@ -734,6 +790,7 @@ final class AppModel: ObservableObject {
         draftLeft = 0
         draftRight = 1
         draftDeviceUID = devices.first(where: { $0.isDefaultInput })?.uid ?? devices.first?.uid
+        prepareDraftForSelectedDevice()
     }
 
     // MARK: - Доступ

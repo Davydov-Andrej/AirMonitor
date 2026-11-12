@@ -41,6 +41,9 @@ struct ContentView: View {
         .onDisappear {
             model.stopObservingDeviceChanges()
         }
+        .sheet(isPresented: $model.isPresentingAddBus) {
+            AddBusSheet()
+        }
         .alert(L("Ошибка"), isPresented: .init(
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }

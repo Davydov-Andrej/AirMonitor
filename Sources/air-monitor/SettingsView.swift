@@ -12,7 +12,7 @@ struct SettingsView: View {
                         Text(language.title).tag(language)
                     }
                 }
-                Picker("Тема приложения", selection: $model.appTheme) {
+                Picker("Оформление приложения", selection: $model.appTheme) {
                     ForEach(AppTheme.allCases) { theme in
                         Text(theme.title).tag(theme)
                     }

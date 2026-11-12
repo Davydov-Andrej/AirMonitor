@@ -83,6 +83,7 @@ struct LoudnessHistoryChart: View {
         )
         .background(Color.primary.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 6))
+        .help(L("На графике LUFS заливка показывает S, а линии — M. Это разные окна измерения."))
         .overlay(alignment: .topLeading) {
             HStack(spacing: 8) {
                 if isStereo {
@@ -152,7 +153,7 @@ struct SpectrumCurveChart: View {
                 } else {
                     legendLine(.secondary.opacity(0.45), "тонкая кривая выкл.")
                 }
-                legendLine(.accentColor.opacity(colorScheme == .dark ? 0.24 : 0.18), LF("полосы 1/%d окт", model.rtaSettings.bandsPerOctave))
+                legendLine(.secondary.opacity(colorScheme == .dark ? 0.5 : 0.4), LF("полосы 1/%d окт", model.rtaSettings.bandsPerOctave))
                 if model.rtaSettings.peakHoldSeconds > 0 {
                     legendLine(.primary.opacity(0.4), LF("пик-холд %.1f с", model.rtaSettings.peakHoldSeconds))
                 } else {

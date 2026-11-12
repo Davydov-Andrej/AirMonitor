@@ -19,7 +19,6 @@ struct AirMonitorCommands: Commands {
         }
         CommandMenu(L("Мониторинг")) {
             Button(L("Добавить шину…")) {
-                show(.dashboard)
                 model.beginAddBus()
             }
             .keyboardShortcut("n", modifiers: .command)
@@ -56,7 +55,7 @@ struct AirMonitorCommands: Commands {
             Button(L("О приложении")) { show(.about) }
                 .keyboardShortcut("5", modifiers: .command)
             Divider()
-            Menu(L("Тема приложения")) {
+            Menu(L("Оформление приложения")) {
                 ForEach(AppTheme.allCases) { theme in
                     Button {
                         model.appTheme = theme

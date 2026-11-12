@@ -1,6 +1,6 @@
 "Оформление" = "Appearance";
 "Язык приложения" = "App language";
-"Тема приложения" = "App theme";
+"Оформление приложения" = "App appearance";
 "Как в системе" = "Follow System";
 "Светлая" = "Light";
 "Тёмная" = "Dark";
@@ -60,6 +60,7 @@
 "Моно-каналы" = "Mono channels";
 "Выберите входное устройство" = "Select an input device";
 "Для стерео выберите два разных канала" = "Select two different channels for stereo";
+"Для стерео нужны два доступных входных канала" = "A stereo bus needs two available input channels";
 "Выберите хотя бы один канал" = "Select at least one channel";
 "Добавьте хотя бы одну шину мониторинга" = "Add at least one monitoring bus";
 "Не удалось подключиться к каналам «%@»" = "Could not connect to channels on “%@”";
@@ -218,6 +219,7 @@
 "−15 с" = "−15 s";
 "−10 с" = "−10 s";
 "−5 с" = "−5 s";
+"На графике LUFS заливка показывает S, а линии — M. Это разные окна измерения." = "On the LUFS chart, the fill shows S while the lines show M. They use different time windows.";
 "Инструменты" = "Instruments";
 "Сглаживание графика LUFS" = "LUFS chart smoothing";
 "Сглаживание чисел M/S" = "M/S number smoothing";
