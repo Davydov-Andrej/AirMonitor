@@ -24,7 +24,7 @@ lipo -create \
     "$INTEL_BIN" \
     -output "$STAGE/$APP_NAME.universal"
 mv "$STAGE/$APP_NAME.universal" "$STAGE/$APP_NAME.app/Contents/MacOS/$APP_NAME"
-codesign --force --deep --sign - \
+codesign --force --sign - \
     --identifier com.airmonitor.app \
     --requirements '=designated => identifier "com.airmonitor.app"' \
     "$STAGE/$APP_NAME.app" >/dev/null
@@ -41,3 +41,18 @@ hdiutil verify "$DMG" >/dev/null
 rm -rf "$STAGE"
 trap - EXIT
 echo "==> Готово: $DMG"
+
+# Prepare local release assets. Publishing to GitHub is a separate explicit step.
+UPDATE_STAGE="$(mktemp -d "${TMPDIR:-/tmp}/AirMonitor-updates.XXXXXX")"
+trap 'rm -rf "$UPDATE_STAGE"' EXIT
+cp "$DMG" "$UPDATE_STAGE/"
+.build/artifacts/sparkle/Sparkle/bin/generate_appcast \
+    --account com.airmonitor.app \
+    --download-url-prefix "https://github.com/Davydov-Andrej/AirMonitor/releases/download/v${VERSION}/" \
+    --link "https://github.com/Davydov-Andrej/AirMonitor/releases/tag/v${VERSION}" \
+    --maximum-deltas 0 \
+    "$UPDATE_STAGE"
+cp "$UPDATE_STAGE/appcast.xml" dist/appcast.xml
+rm -rf "$UPDATE_STAGE"
+trap - EXIT
+echo "==> Подписанный канал обновлений: dist/appcast.xml"

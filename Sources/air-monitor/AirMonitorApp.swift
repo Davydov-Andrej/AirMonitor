@@ -5,11 +5,18 @@ import CoreFoundation
 @main
 struct AirMonitorApp: App {
     @StateObject private var appModel = AppModel()
+    @StateObject private var updates = AppUpdateManager()
 
     var body: some Scene {
         WindowGroup {
             AppAppearanceRoot(model: appModel)
+                .environmentObject(updates)
+                .onAppear { updates.beforeInstall = { appModel.stopCapture() } }
                 .frame(minWidth: 900, minHeight: 560)
+        }
+        .commands {
+            AirMonitorCommands(model: appModel, updates: updates)
+            InstrumentCommands(model: appModel)
         }
     }
 }
@@ -28,6 +35,8 @@ private struct AppAppearanceRoot: View {
     var body: some View {
         ContentView()
             .environmentObject(model)
+            .environment(\.locale, model.appLanguage.locale)
+            .id(model.appLanguage)
             .preferredColorScheme(effectiveColorScheme)
             .animation(.none, value: effectiveColorScheme)
     }
@@ -66,16 +75,15 @@ private final class SystemAppearanceObserver: ObservableObject {
     }
 
     private static func readSystemColorScheme() -> ColorScheme {
-        // Read the global domain directly rather than through UserDefaults' local
-        // cache; after switching the app's preferredColorScheme, that cache can
-        // lag behind a system appearance change.
-        let globalStyle = (CFPreferencesCopyValue(
+        // Light mode is represented by an absent AppleInterfaceStyle key.
+        // Synchronize before reading and do not fall back to a cached Dark value.
+        CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        let globalStyle = CFPreferencesCopyValue(
             "AppleInterfaceStyle" as CFString,
             kCFPreferencesAnyApplication,
             kCFPreferencesCurrentUser,
             kCFPreferencesAnyHost
-        ) as? String) ?? UserDefaults.standard
-            .persistentDomain(forName: UserDefaults.globalDomain)?["AppleInterfaceStyle"] as? String
+        ) as? String
         return globalStyle?.caseInsensitiveCompare("Dark") == .orderedSame ? .dark : .light
     }
 }

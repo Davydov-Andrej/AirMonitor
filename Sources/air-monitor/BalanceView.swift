@@ -63,7 +63,7 @@ struct BalanceBusCardContainer: View {
                     }
                     Spacer()
                     if let correlation = holder.snapshot?.correlation {
-                        Text(String(format: "Корр. L/R: %.2f", correlation))
+                        Text(LF("Корр. L/R: %.2f", correlation))
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }

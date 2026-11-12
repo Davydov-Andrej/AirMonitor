@@ -10,13 +10,13 @@ struct ContentView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            TabView {
+            TabView(selection: $model.selectedTab) {
                 DashboardView()
-                    .tabItem { Label("Дашборд", systemImage: "square.grid.2x2") }
+                    .tabItem { Label("Дашборд", systemImage: "square.grid.2x2") }.tag(AppTab.dashboard)
                 MonitorView()
-                    .tabItem { Label("Монитор", systemImage: "waveform") }
+                    .tabItem { Label("Монитор", systemImage: "waveform") }.tag(AppTab.monitor)
                 SpectrumView()
-                    .tabItem { Label("Спектр (АЧХ)", systemImage: "chart.bar.xaxis") }
+                    .tabItem { Label("Спектр (АЧХ)", systemImage: "chart.bar.xaxis") }.tag(AppTab.spectrum)
                 BalanceView()
                     .tabItem {
                         VStack(spacing: 1) {
@@ -25,9 +25,9 @@ struct ContentView: View {
                                 .font(.system(size: 7, weight: .medium))
                                 .foregroundStyle(.orange)
                         }
-                    }
+                    }.tag(AppTab.balance)
                 SettingsView()
-                    .tabItem { Label("О приложении", systemImage: "info.circle") }
+                    .tabItem { Label("О приложении", systemImage: "info.circle") }.tag(AppTab.about)
             }
         }
         .onAppear {
@@ -41,7 +41,7 @@ struct ContentView: View {
         .onDisappear {
             model.stopObservingDeviceChanges()
         }
-        .alert("Ошибка", isPresented: .init(
+        .alert(L("Ошибка"), isPresented: .init(
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
         )) {
@@ -59,26 +59,13 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 8)
-            Menu {
-                Picker("Тема приложения", selection: $model.appTheme) {
-                    ForEach(AppTheme.allCases) { theme in
-                        Text(theme.title).tag(theme)
-                    }
-                }
-                .pickerStyle(.inline)
-            } label: {
-                Image(systemName: "circle.lefthalf.filled")
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize(horizontal: true, vertical: false)
-            .help("Тема: как в системе, светлая или тёмная")
             Spacer()
             if model.isCapturing {
                 HStack(spacing: 6) {
                     Circle()
                         .fill(Color.red)
                         .frame(width: 8, height: 8)
-                    Text("REC · \(model.buses.count)")
+                    Text(LF("Анализ · %d", model.buses.count))
                         .font(.caption)
                 }
             } else if model.buses.isEmpty {
@@ -92,7 +79,7 @@ struct ContentView: View {
             } label: {
                 Label("Шина", systemImage: "plus")
             }
-            Button(model.isCapturing ? "Стоп" : "Старт") {
+            Button(model.isCapturing ? L("Стоп") : L("Старт")) {
                 if model.isCapturing {
                     model.stopCapture()
                 } else {
@@ -115,7 +102,7 @@ struct ContentView: View {
 
     private var devicesSummary: String {
         let input = model.devices.filter { $0.inputChannels > 0 }
-        if input.isEmpty { return "Нет устройств" }
-        return "Устройств: \(input.count)"
+        if input.isEmpty { return L("Нет устройств") }
+        return LF("Устройств: %d", input.count)
     }
 }

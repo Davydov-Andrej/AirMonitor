@@ -14,6 +14,9 @@ let package = Package(
         .executable(name: "air-aio", targets: ["air-aio"]),
         .executable(name: "dspcheck", targets: ["dspcheck"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1")
+    ],
     targets: [
         .target(
             name: "yaCore",
@@ -28,7 +31,8 @@ let package = Package(
         ),
         .executableTarget(
             name: "air-monitor",
-            dependencies: ["yaCore", "uaDSP"]
+            dependencies: ["yaCore", "uaDSP", .product(name: "Sparkle", package: "Sparkle")],
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),
         .executableTarget(
             name: "air-aio",

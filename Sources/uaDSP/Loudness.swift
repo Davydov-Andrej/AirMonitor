@@ -62,7 +62,7 @@ public final class LoudnessMeter {
     private let lraHistogramMin: Float = -70
     private let lraHistogramStep: Float = 0.1
     private var lraCounts = [Int](repeating: 0, count: 901)
-    private var lraAbsoluteLevelSum: Double = 0
+    private var lraAbsolutePowerSum: Double = 0
     private var lraAbsoluteCount = 0
     private var blockCounter = 0
     private var integratedCounter = 0
@@ -132,7 +132,7 @@ public final class LoudnessMeter {
         integratedCounts.indices.forEach { integratedCounts[$0] = 0 }
         integratedPowerSums.indices.forEach { integratedPowerSums[$0] = 0 }
         lraCounts.indices.forEach { lraCounts[$0] = 0 }
-        lraAbsoluteLevelSum = 0
+        lraAbsolutePowerSum = 0
         lraAbsoluteCount = 0
         history.removeAll(keepingCapacity: true)
         blockCounter = 0
@@ -234,7 +234,7 @@ public final class LoudnessMeter {
             rawShortTerm = loudness(power)
         }
 
-        if blockPowers.count >= 30, blockCounter % 10 == 0 {
+        if blockPowers.count >= 30 {
             let power = blockPowers.suffix(30).reduce(0, +) / 30
             recordLRA(loudness(power))
             updateLRA()
@@ -322,7 +322,7 @@ public final class LoudnessMeter {
         // EBU Tech 3342 uses an absolute gate and a relative gate 20 LU below
         // the absolute-gated short-term loudness distribution.
         guard lraAbsoluteCount >= 10 else { return }
-        let relative = Float(lraAbsoluteLevelSum / Double(lraAbsoluteCount)) - 20
+        let relative = loudness(Float(lraAbsolutePowerSum / Double(lraAbsoluteCount))) - 20
         let threshold = max(LoudnessConstants.absoluteGateLU, relative)
         let firstBin = min(lraCounts.count, max(0, Int(ceil((threshold - lraHistogramMin) / lraHistogramStep))))
         guard firstBin < lraCounts.count else { return }
@@ -349,7 +349,7 @@ public final class LoudnessMeter {
         let index = min(lraCounts.count - 1,
                         max(0, Int((level - lraHistogramMin) / lraHistogramStep)))
         lraCounts[index] += 1
-        lraAbsoluteLevelSum += Double(level)
+        lraAbsolutePowerSum += pow(10, (Double(level) + 0.691) / 10)
         lraAbsoluteCount += 1
     }
 

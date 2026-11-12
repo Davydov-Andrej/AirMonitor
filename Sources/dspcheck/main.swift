@@ -196,7 +196,30 @@ final class Runner {
         check(abs(r.shortTermLUFS - r.momentaryLUFS) < 0.15,
               "S соответствует стандартному трёхсекундному окну")
 
+        checkLRAGate()
         print("\nИтог: \(failures == 0 ? "ВСЕ ПРОШЛИ" : "ОШИБОК: \(failures)")")
+    }
+
+    private func checkLRAGate() {
+        // A quiet section 34 dB below the loud section must be excluded by the
+        // energy-based relative gate. An arithmetic mean of LUFS would admit it.
+        let meter = LoudnessMeter(sampleRate: 8000)
+        let cycle = (0..<800).map { sinf(2 * .pi * 1000 * Float($0) / 8000) }
+        var levels: [Float] = []
+        for block in 0..<600 {
+            let amplitude: Float = block < 300 ? 0.1 : 0.002
+            meter.process(cycle.map { $0 * amplitude })
+            if block >= 29 { levels.append(meter.reading().shortTermLUFS) }
+        }
+        let absolute = levels.filter { $0 >= -70 }
+        let meanPower = absolute.reduce(0.0) { $0 + pow(10, Double($1) / 10) } / Double(absolute.count)
+        let threshold = Float(10 * log10(meanPower)) - 20
+        let gated = absolute.filter { $0 >= threshold }.sorted()
+        let lower = gated[Int(Double(gated.count - 1) * 0.10)]
+        let upper = gated[Int(Double(gated.count - 1) * 0.95)]
+        let expected = upper - lower
+        check(expected < 5 && abs(meter.reading().loudnessRangeLU - expected) < 0.25,
+              "LRA: энергетический гейт и выборки 10 Гц совпадают с независимым расчётом")
     }
 }
 

@@ -61,9 +61,9 @@ struct SpectrumView: View {
                     get: { model.rtaSettings.autoDowngrade },
                     set: { model.rtaSettings.autoDowngrade = $0 }
                 ))
-                .help("При высокой загрузке CPU автоматически уменьшает детальность тонкой кривой (1/24 → 1/12 → 1/6 октавы → выкл), чтобы спектр не пропадал. Выключите, если хотите всегда максимальную детальность.")
+                .help(L("При высокой загрузке CPU автоматически уменьшает детальность тонкой кривой (1/24 → 1/12 → 1/6 октавы → выкл), чтобы спектр не пропадал. Выключите, если хотите всегда максимальную детальность."))
             } label: {
-                Label("Полосы: 1/\(model.rtaSettings.bandsPerOctave) окт", systemImage: "slider.horizontal.3")
+                Label(LF("Полосы: 1/%d окт", model.rtaSettings.bandsPerOctave), systemImage: "slider.horizontal.3")
             }
 
             // Динамика кривой: атака, спад, сглаживание.

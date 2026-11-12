@@ -25,6 +25,14 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 cp "$BIN" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp Resources/AirMonitor_black.png "$APP_BUNDLE/Contents/Resources/AirMonitor_black.png"
 cp Resources/AirMonitor_white.png "$APP_BUNDLE/Contents/Resources/AirMonitor_white.png"
+mkdir -p "$APP_BUNDLE/Contents/Resources/en.lproj"
+cp Resources/en.lproj/Localizable.strings "$APP_BUNDLE/Contents/Resources/en.lproj/Localizable.strings"
+SPARKLE_FRAMEWORK=".build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+mkdir -p "$APP_BUNDLE/Contents/Frameworks"
+rm -rf "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
+ditto "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
+cp .build/artifacts/sparkle/Sparkle/LICENSE "$APP_BUNDLE/Contents/Resources/Sparkle-LICENSE.txt"
+UPDATE_PUBLIC_KEY="$(tr -d '\r\n' < Resources/UpdatePublicKey.txt)"
 
 ICONSET="$APP_BUNDLE/Contents/Resources/AirMonitor.iconset"
 rm -rf "$ICONSET"
@@ -61,6 +69,10 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
     <string>AirMonitor.icns</string>
     <key>CFBundleDisplayName</key>
     <string>AirMonitor</string>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>ru</string>
+    <key>CFBundleLocalizations</key>
+    <array><string>ru</string><string>en</string></array>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -72,6 +84,16 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
     <key>NSMicrophoneUsageDescription</key>
     <string>AirMonitor анализирует звук с выбранного входного аудиоустройства (USB-микшер, аудиоинтерфейс, виртуальная карта).</string>
     <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>SUFeedURL</key>
+    <string>https://github.com/Davydov-Andrej/AirMonitor/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>$UPDATE_PUBLIC_KEY</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAutomaticallyUpdate</key>
+    <true/>
+    <key>SUVerifyUpdateBeforeExtraction</key>
     <true/>
 </dict>
 </plist>
@@ -86,7 +108,7 @@ printf 'APPL????' > "$APP_BUNDLE/Contents/PkgInfo"
 # TCC привязывает mic-разрешение к подписи. Дефолтный adhoc DR = конкретный
 # cdhash (меняется каждый билд) -> macOS считал приложение "новым" и сбрасывал
 # разрешение. Identifier-based DR переживает любые пересборки.
-codesign --force --deep --sign - \
+codesign --force --sign - \
     --identifier com.airmonitor.app \
     --requirements '=designated => identifier "com.airmonitor.app"' \
     "$APP_BUNDLE" >/dev/null

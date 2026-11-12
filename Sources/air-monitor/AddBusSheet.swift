@@ -8,26 +8,26 @@ struct AddBusSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(model.isEditingBus ? "Редактировать шину" : "Новая шина мониторинга")
+            Text(model.isEditingBus ? L("Редактировать шину") : L("Новая шина мониторинга"))
                 .font(.title2)
 
             Form {
-                Section("Устройство") {
+                Section(L("Устройство")) {
                     if model.devices.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
-                            Label("Входные устройства не найдены", systemImage: "waveform.badge.exclamationmark")
+                            Label(L("Входные устройства не найдены"), systemImage: "waveform.badge.exclamationmark")
                                 .font(.headline)
-                            Text("Подключите микрофон, аудиоинтерфейс или виртуальный источник (например, Loopback). Проверьте, что устройство отображается в Системных настройках → Звук → Вход.")
+                            Text(L("Подключите микрофон, аудиоинтерфейс или виртуальный источник (например, Loopback). Проверьте, что устройство отображается в Системных настройках → Звук → Вход."))
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
-                            Button("Обновить список устройств") {
+                            Button(L("Обновить список устройств")) {
                                 model.refreshDevices()
                             }
                         }
                         .padding(.vertical, 4)
                     } else {
-                        Picker("Источник звука", selection: $model.draftDeviceUID) {
+                        Picker(L("Источник звука"), selection: $model.draftDeviceUID) {
                             ForEach(model.devices) { device in
                                 Text("\(device.name) (\(device.inputChannels) ch)")
                                     .tag(device.uid as String?)
@@ -40,16 +40,16 @@ struct AddBusSheet: View {
                 }
 
                 if !model.devices.isEmpty {
-                Section("Режим") {
-                    Picker("Режим", selection: $model.draftMode) {
+                Section(L("Режим")) {
+                    Picker(L("Режим"), selection: $model.draftMode) {
                         ForEach(BusDraftMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
+                            Text(mode.title).tag(mode)
                         }
                     }
                     .pickerStyle(.segmented)
 
                     if model.draftMode == .stereo {
-                        LabeledContent("Каналы L/R") {
+                        LabeledContent(L("Каналы L/R")) {
                             HStack(spacing: 16) {
                                 Picker("L", selection: $model.draftLeft) {
                                     ForEach(0..<max(model.draftChannelCount, 1), id: \.self) { i in
@@ -72,8 +72,8 @@ struct AddBusSheet: View {
                     }
                 }
 
-                Section("Имя") {
-                    TextField("Например: Main, Monitor, Subs…", text: $model.draftName)
+                Section(L("Имя")) {
+                    TextField(L("Например: Main, Monitor, Subs…"), text: $model.draftName)
                 }
                 }
             }
@@ -81,10 +81,10 @@ struct AddBusSheet: View {
 
             HStack {
                 Spacer()
-                Button("Отмена") {
+                Button(L("Отмена")) {
                     dismiss()
                 }
-                Button(model.isEditingBus ? "Сохранить" : "Добавить") {
+                Button(model.isEditingBus ? L("Сохранить") : L("Добавить")) {
                     model.commitDraftBus()
                     if model.errorMessage == nil {
                         dismiss()
@@ -110,11 +110,11 @@ struct MultiChannelPicker: View {
     @State private var isOpen = false
 
     private var summary: String {
-        if selected.isEmpty { return "Выберите каналы" }
+        if selected.isEmpty { return L("Выберите каналы") }
         if selected.count <= 6 {
             return selected.sorted().map { "\($0 + 1)" }.joined(separator: ", ")
         }
-        return "Выбрано \(selected.count) каналов"
+        return LF("Выбрано %d каналов", selected.count)
     }
 
     var body: some View {
@@ -150,7 +150,7 @@ struct MultiChannelPicker: View {
                                 HStack {
                                     Image(systemName: selected.contains(i) ? "checkmark.square.fill" : "square")
                                         .foregroundStyle(selected.contains(i) ? Color.accentColor : .secondary)
-                                    Text("Канал \(i + 1)")
+                                    Text(LF("Канал %d", i + 1))
                                         .foregroundStyle(.primary)
                                     Spacer()
                                 }

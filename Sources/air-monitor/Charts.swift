@@ -1,6 +1,10 @@
 import SwiftUI
 import yaCore
 
+private extension InstrumentBand {
+    var displayName: String { L(localizedName) }
+}
+
 private enum LiveChartHover {
     static func spectrum(holder: BusSnapshotHolder, point: CGPoint, size: CGSize) -> String {
         guard size.width > 0,
@@ -13,9 +17,9 @@ private enum LiveChartHover {
             : channel.fineCurve
         guard let nearest = candidates.min(by: { abs($0.frequency - frequency) < abs($1.frequency - frequency) }) else { return "" }
         let frequencyLabel = nearest.frequency >= 1000
-            ? String(format: "%.2f кГц", nearest.frequency / 1000)
-            : String(format: "%.0f Гц", nearest.frequency)
-        return "\(frequencyLabel): \(String(format: "%.1f", nearest.magnitudeDB)) дБFS"
+            ? LF("%.2f кГц", nearest.frequency / 1000)
+            : LF("%.0f Гц", nearest.frequency)
+        return LF("%@: %.1f дБFS", frequencyLabel, nearest.magnitudeDB)
     }
 
     static func loudness(holder: BusSnapshotHolder, isStereo: Bool, point: CGPoint, size: CGSize) -> String {
@@ -51,7 +55,7 @@ private enum LiveChartHover {
         guard !values.isEmpty else { return "" }
         let index = min(values.count - 1, max(0, Int(point.x / size.width * CGFloat(values.count))))
         let value = values[index]
-        return "\(value.band.localizedName): \(String(format: "%+.1f", value.deviationDB)) дБ · уровень \(String(format: "%.1f", value.energyDB)) дБFS"
+        return LF("%@: %+.1f дБ · уровень %.1f дБFS", value.band.displayName, value.deviationDB, value.energyDB)
     }
 }
 
@@ -108,14 +112,14 @@ struct LoudnessHistoryChart: View {
             } else {
                 Capsule().fill(color).frame(width: 12, height: 2)
             }
-            Text(label).font(.system(size: 8)).foregroundStyle(.secondary)
+            Text(L(label)).font(.system(size: 8)).foregroundStyle(.secondary)
         }
     }
 
     private func legendFill(_ color: Color, _ label: String) -> some View {
         HStack(spacing: 3) {
             RoundedRectangle(cornerRadius: 1).fill(color).frame(width: 10, height: 7)
-            Text(label).font(.system(size: 8)).foregroundStyle(.secondary)
+            Text(L(label)).font(.system(size: 8)).foregroundStyle(.secondary)
         }
     }
 }
@@ -144,13 +148,13 @@ struct SpectrumCurveChart: View {
         .overlay(alignment: .topLeading) {
             HStack(spacing: 8) {
                 if let divisions = fineCurveDivisions {
-                    legendLine(.accentColor, "кривая ≈1/\(divisions) окт")
+                    legendLine(.accentColor, LF("кривая ≈1/%d окт", divisions))
                 } else {
                     legendLine(.secondary.opacity(0.45), "тонкая кривая выкл.")
                 }
-                legendLine(.accentColor.opacity(colorScheme == .dark ? 0.24 : 0.18), "полосы 1/\(model.rtaSettings.bandsPerOctave) окт")
+                legendLine(.accentColor.opacity(colorScheme == .dark ? 0.24 : 0.18), LF("полосы 1/%d окт", model.rtaSettings.bandsPerOctave))
                 if model.rtaSettings.peakHoldSeconds > 0 {
-                    legendLine(.primary.opacity(0.4), "пик-холд \(String(format: "%.1f", model.rtaSettings.peakHoldSeconds)) с")
+                    legendLine(.primary.opacity(0.4), LF("пик-холд %.1f с", model.rtaSettings.peakHoldSeconds))
                 } else {
                     legendLine(.primary.opacity(0.4), "пик-холд выкл.")
                 }
@@ -162,7 +166,7 @@ struct SpectrumCurveChart: View {
     private func legendLine(_ color: Color, _ label: String) -> some View {
         HStack(spacing: 3) {
             RoundedRectangle(cornerRadius: 1).fill(color).frame(width: 10, height: 3)
-            Text(label).font(.system(size: 8)).foregroundStyle(.secondary)
+            Text(L(label)).font(.system(size: 8)).foregroundStyle(.secondary)
         }
     }
 
@@ -209,21 +213,21 @@ struct TonalBalanceChart: View {
     private func legendLine(_ color: Color, _ label: String) -> some View {
         HStack(spacing: 3) {
             Capsule().fill(color).frame(width: 10, height: 2)
-            Text(label).font(.system(size: 8)).foregroundStyle(.secondary)
+            Text(L(label)).font(.system(size: 8)).foregroundStyle(.secondary)
         }
     }
 
     private func legendFill(_ color: Color, _ label: String) -> some View {
         HStack(spacing: 3) {
             RoundedRectangle(cornerRadius: 1).fill(color).frame(width: 9, height: 6)
-            Text(label).font(.system(size: 8)).foregroundStyle(.secondary)
+            Text(L(label)).font(.system(size: 8)).foregroundStyle(.secondary)
         }
     }
 
     private func legendDot(_ color: Color, _ label: String) -> some View {
         HStack(spacing: 3) {
             Circle().fill(color).frame(width: 5, height: 5)
-            Text(label).font(.system(size: 8)).foregroundStyle(.secondary)
+            Text(L(label)).font(.system(size: 8)).foregroundStyle(.secondary)
         }
     }
 }
@@ -254,7 +258,7 @@ struct InstrumentBalanceStrip: View {
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity)
-                .help("\(balance.band.localizedName): \(String(format: "%+.1f", balance.deviationDB)) дБ")
+                .help(LF("%@: %+.1f дБ", balance.band.displayName, balance.deviationDB))
             }
         }
     }

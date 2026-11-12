@@ -64,7 +64,7 @@ enum CGChart {
                 .font: NSFont.systemFont(ofSize: 7),
                 .foregroundColor: NSColor.tertiaryLabelColor,
             ]
-            drawText(ctx: ctx, NSAttributedString(string: "дБFS", attributes: unitAttrs),
+            drawText(ctx: ctx, NSAttributedString(string: L("дБFS"), attributes: unitAttrs),
                      at: CGPoint(x: 4, y: 2), height: size.height)
         }
     }
@@ -96,8 +96,8 @@ enum CGChart {
             // Горизонтальная ось: возраст данных, справа «сейчас».
             let windowSeconds = 30.0
             let timeLabels: [(Double, String)] = [
-                (25, "−25 с"), (20, "−20 с"), (15, "−15 с"),
-                (10, "−10 с"), (5, "−5 с"), (0, "сейчас")
+                (25, L("−25 с")), (20, L("−20 с")), (15, L("−15 с")),
+                (10, L("−10 с")), (5, L("−5 с")), (0, L("сейчас"))
             ]
             for (sec, label) in timeLabels {
                 let x = size.width * CGFloat((windowSeconds - sec) / windowSeconds)
@@ -116,7 +116,7 @@ enum CGChart {
             stroke(ctx, targetPath, color: .systemGreen, width: 1, alpha: 0.45, dash: [4, 3])
             // Это ориентир на временном графике M/S; цель EBU R 128
             // относится к Integrated loudness, а не к каждому мгновению.
-            let reference = NSAttributedString(string: "ориентир −23 LUFS", attributes: labelAttrs)
+            let reference = NSAttributedString(string: L("ориентир −23 LUFS"), attributes: labelAttrs)
             drawText(ctx: ctx, reference,
                      at: CGPoint(x: max(3, size.width - reference.size().width - 4), y: ty + 2),
                      height: size.height)
@@ -289,7 +289,7 @@ enum CGChart {
                 path.move(to: CGPoint(x: 0, y: y))
                 path.addLine(to: CGPoint(x: size.width, y: y))
                 stroke(ctx, path, color: .separatorColor, width: 0.5, alpha: db == 0 ? 0.18 : 0.1)
-                drawText(ctx: ctx, NSAttributedString(string: "\(label) дБ", attributes: attrs),
+                drawText(ctx: ctx, NSAttributedString(string: "\(label) \(L("дБ"))", attributes: attrs),
                          at: CGPoint(x: 3, y: y + 1), height: size.height)
             }
         }

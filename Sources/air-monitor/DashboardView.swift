@@ -13,7 +13,7 @@ struct DashboardView: View {
                 Text("Дашборд")
                     .font(.title2)
                 if let scene = model.currentSceneName {
-                    Text("Сцена: \(scene)")
+                    Text(LF("Сцена: %@", scene))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -100,12 +100,12 @@ struct DashboardView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Toggle("Русские пояснения к метрикам", isOn: $model.showMetricHints)
+            Toggle("Пояснения к метрикам", isOn: $model.showMetricHints)
         } label: {
             Label("Вид", systemImage: "rectangle.grid.2x2")
         }
         .fixedSize(horizontal: true, vertical: false)
-        .help("Инструменты переносятся на следующий ряд по ширине. Графики могут заполнять свободное место в своей строке.")
+        .help(L("Инструменты переносятся на следующий ряд по ширине. Графики могут заполнять свободное место в своей строке."))
     }
 
     private var sceneMenu: some View {
@@ -151,13 +151,13 @@ struct SaveSceneSheet: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("Сохранить сцену").font(.title3)
-            TextField("Имя сцены", text: $model.sceneSaveName)
+            Text(L("Сохранить сцену")).font(.title3)
+            TextField(L("Имя сцены"), text: $model.sceneSaveName)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 300)
             HStack {
-                Button("Отмена") { dismiss() }
-                Button("Сохранить") {
+                Button(L("Отмена")) { dismiss() }
+                Button(L("Сохранить")) {
                     model.saveScene(named: model.sceneSaveName)
                     dismiss()
                 }
@@ -273,7 +273,7 @@ private struct EmptyDashboardModuleRow: View {
             .overlay {
                 RoundedRectangle(cornerRadius: 7)
                     .strokeBorder(Color.secondary.opacity(isTargeted ? 0.55 : 0.22), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
-                Text(isTargeted ? "Отпустите, чтобы перенести сюда" : "Перетащите сюда — ряд \(rowIndex + 1)")
+                Text(isTargeted ? L("Отпустите, чтобы перенести сюда") : LF("Перетащите сюда — ряд %d", rowIndex + 1))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -318,6 +318,7 @@ struct BusDashboardCard: View {
     @State private var dragPointer: CGPoint?
     @State private var dragGrabOffset: CGSize?
     @State private var insertion: DashboardInsertion?
+    @State private var resizePreviewHeights: [DashboardModule: CGFloat] = [:]
 
     var body: some View {
         let modules = visibleModules
@@ -334,7 +335,7 @@ struct BusDashboardCard: View {
                     ForEach(rows.filter { !$0.modules.isEmpty || draggedModule != nil }) { row in moduleRow(row) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: moduleAreaHeight(for: rows))
+                .frame(height: moduleAreaHeight(for: rows), alignment: .top)
                 .background {
                     GeometryReader { geometry in
                         Color.clear
@@ -376,10 +377,10 @@ struct BusDashboardCard: View {
             }
         }
         .overlay(alignment: .topLeading) { floatingDraggedModule }
-        .alert("Переименовать", isPresented: $isRenaming) {
-            TextField("Имя шины", text: $renameText)
+        .alert(L("Переименовать"), isPresented: $isRenaming) {
+            TextField(L("Имя шины"), text: $renameText)
             Button("OK") { onRename(renameText) }
-            Button("Отмена", role: .cancel) {}
+            Button(L("Отмена"), role: .cancel) {}
         }
         .onChange(of: visibleModules) { _, _ in persistAutomaticRows() }
         .onChange(of: dashboardModuleWidths) { _, _ in persistAutomaticRows(clearRowOverrides: true) }
@@ -563,8 +564,14 @@ struct BusDashboardCard: View {
         let visibleRows = rows.filter { !$0.modules.isEmpty || draggedModule != nil }
         guard !visibleRows.isEmpty else { return 0 }
         return visibleRows.reduce(CGFloat(0)) { total, row in
-            total + (row.modules.map(moduleHeight).max() ?? 44)
+            total + moduleRowHeight(row)
         } + CGFloat(max(0, visibleRows.count - 1)) * 8
+    }
+
+    private func moduleRowHeight(_ row: DashboardModuleRow) -> CGFloat {
+        guard !row.modules.isEmpty else { return 44 }
+        let heights = row.modules.map { resizePreviewHeights[$0] ?? moduleHeight($0) }
+        return (heights.max() ?? 240) + 8
     }
 
     private func moduleRow(_ row: DashboardModuleRow) -> some View {
@@ -575,7 +582,7 @@ struct BusDashboardCard: View {
                     isTargeted: insertion?.target == nil && insertion?.row == row.index
                 )
             } else {
-                let rowHeight = (row.modules.map(moduleHeight).max() ?? 240) + 8
+                let rowHeight = moduleRowHeight(row)
                 let widths = effectiveModuleWidths(in: row.modules, availableWidth: max(0, moduleAreaWidth - 4))
                 ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: 8) {
@@ -602,6 +609,7 @@ struct BusDashboardCard: View {
                                         height: Double(newHeight / scale)
                                     )
                                 },
+                                onResizeHeightChanged: { resizePreviewHeights[module] = $0 },
                                 onDragChanged: { start, point in updateModuleDrag(module, start: start, point: point) },
                                 onDragEnded: { point in endModuleDrag(module, at: point) }
                             )
@@ -755,7 +763,7 @@ struct BusDashboardCard: View {
                         snapshot: summaryChannel,
                         showHints: model.showMetricHints,
                         extraMetrics: [
-                            ("Crest", "динамика", summaryChannel?.crestFactorDB),
+                            ("Crest", "пик/RMS", summaryChannel?.crestFactorDB),
                             ("Корр.", "L/R", snapshot?.correlation),
                         ]
                     )
@@ -767,7 +775,7 @@ struct BusDashboardCard: View {
                         title: summaryChannel.map { String($0.label.suffix(2)).trimmingCharacters(in: .whitespaces) } ?? "",
                         snapshot: summaryChannel,
                         showHints: model.showMetricHints,
-                        extraMetrics: [("Crest", "динамика", summaryChannel?.crestFactorDB)]
+                        extraMetrics: [("Crest", "пик/RMS", summaryChannel?.crestFactorDB)]
                     )
                 }
             }
@@ -782,7 +790,7 @@ struct BusDashboardCard: View {
                 .padding(.horizontal, 3)
                 .contentShape(Rectangle())
                 .draggable(dragIdentifier)
-                .help("Перетащите, чтобы изменить положение блока")
+                .help(L("Перетащите, чтобы изменить положение блока"))
 
             VStack(spacing: 2) {
                 Button(action: onMoveUp) {
@@ -818,7 +826,7 @@ struct BusDashboardCard: View {
                 Label("устройство отключено", systemImage: "cable.connector.slash")
                     .font(.caption2)
                     .foregroundStyle(.red)
-                    .help("Анализ прерван. Подключите устройство — мониторинг продолжится автоматически.")
+                    .help(L("Анализ прерван. Подключите устройство — мониторинг продолжится автоматически."))
             }
             Spacer()
             Menu {
@@ -851,8 +859,8 @@ struct BusDashboardCard: View {
 
     private var modeLabel: String {
         switch mode {
-        case .stereo(let l, let r): return "Стерео \(l + 1)/\(r + 1)"
-        case .mono(let ch): return "Моно " + ch.map { "\($0 + 1)" }.joined(separator: "+")
+        case .stereo(let l, let r): return LF("Стерео %d/%d", l + 1, r + 1)
+        case .mono(let ch): return L("Моно ") + ch.map { "\($0 + 1)" }.joined(separator: "+")
         }
     }
 }
@@ -901,6 +909,7 @@ private struct DashboardModuleTile<Content: View>: View {
     let isDropTargeted: Bool
     let content: () -> Content
     let onResize: (CGFloat, CGFloat) -> Void
+    let onResizeHeightChanged: (CGFloat?) -> Void
     let onDragChanged: (CGPoint, CGPoint) -> Void
     let onDragEnded: (CGPoint) -> Void
     @State private var resizeStart: CGSize?
@@ -921,6 +930,7 @@ private struct DashboardModuleTile<Content: View>: View {
         isDropTargeted: Bool,
         @ViewBuilder content: @escaping () -> Content,
         onResize: @escaping (CGFloat, CGFloat) -> Void,
+        onResizeHeightChanged: @escaping (CGFloat?) -> Void,
         onDragChanged: @escaping (CGPoint, CGPoint) -> Void,
         onDragEnded: @escaping (CGPoint) -> Void
     ) {
@@ -935,6 +945,7 @@ private struct DashboardModuleTile<Content: View>: View {
         self.isDropTargeted = isDropTargeted
         self.content = content
         self.onResize = onResize
+        self.onResizeHeightChanged = onResizeHeightChanged
         self.onDragChanged = onDragChanged
         self.onDragEnded = onDragEnded
     }
@@ -952,7 +963,7 @@ private struct DashboardModuleTile<Content: View>: View {
                     .padding(5)
                     .contentShape(Rectangle())
                     .highPriorityGesture(dragGesture)
-                    .help("Перетащите блок: соседние блоки переставляются по мере движения")
+                    .help(L("Перетащите блок: соседние блоки переставляются по мере движения"))
                 Image(systemName: module.symbol)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -1001,7 +1012,7 @@ private struct DashboardModuleTile<Content: View>: View {
                 // horizontal ScrollView's pan gesture. Otherwise SwiftUI can
                 // alternate between resizing and scrolling as the pointer moves.
                 .highPriorityGesture(resizeGesture)
-                .help("Потяните за угол, чтобы изменить размер блока")
+                .help(L("Потяните за угол, чтобы изменить размер блока"))
                 .padding(2)
         }
         .overlay {
@@ -1022,7 +1033,9 @@ private struct DashboardModuleTile<Content: View>: View {
     }
 
     private var resizeGesture: some Gesture {
-        DragGesture(minimumDistance: 2)
+        // The handle itself moves as the card grows. Global coordinates keep
+        // its translation independent of the changing local layout origin.
+        DragGesture(minimumDistance: 2, coordinateSpace: .global)
             .onChanged { value in
                 let start = resizeStart ?? CGSize(width: width, height: height)
                 if resizeStart == nil {
@@ -1038,7 +1051,10 @@ private struct DashboardModuleTile<Content: View>: View {
                     height: ((rawHeight * scale).rounded() / scale).clamped(to: minimumHeight...700)
                 )
                 if draftSize != nextSize {
-                    withTransaction(Transaction(animation: nil)) { draftSize = nextSize }
+                    withTransaction(Transaction(animation: nil)) {
+                        draftSize = nextSize
+                        onResizeHeightChanged(nextSize.height)
+                    }
                 }
             }
             .onEnded { value in
@@ -1056,6 +1072,7 @@ private struct DashboardModuleTile<Content: View>: View {
                 resizeSnapHeights = nil
                 withTransaction(Transaction(animation: nil)) {
                     onResize(finalWidth, finalHeight)
+                    onResizeHeightChanged(nil)
                 }
             }
     }
@@ -1184,7 +1201,7 @@ struct MetricsColumn: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             if !title.isEmpty {
-                Text(title)
+                Text(L(title))
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
@@ -1202,7 +1219,7 @@ struct MetricsColumn: View {
                       tooltip: Self.tooltips["RMS"])
             metricRow("TruePk", "межсэмпл. пик", snapshot?.truePeakDB,
                       tooltip: Self.tooltips["TruePk"])
-            metricRow("I", "громкость эфира", snapshot?.integratedLUFS,
+            metricRow("I", "интегральная", snapshot?.integratedLUFS,
                       tooltip: Self.tooltips["I"])
             metricRow("LRA", "диапазон громк.", snapshot?.loudnessRangeLU,
                       tooltip: Self.tooltips["LRA"])
@@ -1216,7 +1233,7 @@ struct MetricsColumn: View {
     private var shortTermTooltip: String {
         let seconds = model.rtaSettings.shortTermSeconds
         let duration = seconds.rounded() == seconds ? String(Int(seconds)) : String(format: "%.1f", seconds)
-        return "S (Short-term), LUFS: K-взвешенная громкость на скользящем окне последних \(duration) с, без гейтинга. EBU Mode использует 3 с; длительность здесь меняется в настройках Монитора. Дополнительное сглаживание отображаемого M/S задаётся отдельно."
+        return LF("S (Short-term), LUFS: K-взвешенная громкость на скользящем окне последних %@ с, без гейтинга. EBU Mode использует 3 с; длительность здесь меняется в настройках Монитора. Дополнительное сглаживание отображаемого M/S задаётся отдельно.", duration)
     }
 
     private static let momentaryTooltip = "M (Momentary), LUFS: K-взвешенная громкость на скользящем окне последних 400 мс, без гейтинга. При цифровой тишине отображается нижний предел шкалы −120 LUFS. Дополнительное сглаживание отображаемого M/S задаётся отдельно."
@@ -1229,11 +1246,11 @@ struct MetricsColumn: View {
 
     /// Словарь подсказок по имени метрики — покрывает и extraMetrics.
     private static let tooltips: [String: String] = [
-        "Crest": "Crest factor (дБ) — разность максимального Sample Peak и среднеквадратичного уровня с начала текущего измерения.",
+        "Crest": "Crest factor (дБ) — разность максимального Sample Peak и среднеквадратичного уровня с начала текущего измерения. Для стереошины показывается большее из значений L/R.",
         "Корр.": "Корреляция L/R за текущий аудиоблок (от −1 до +1): +1 — каналы совпадают по фазе, 0 — слабо коррелируют, −1 — противоположны по фазе.",
         "Peak": "Sample Peak (dBFS) — максимальный уровень отдельного цифрового сэмпла с начала текущего измерения. 0 dBFS соответствует полной цифровой шкале.",
-        "RMS": "RMS (dBFS) — среднеквадратичный уровень; для заливки метра используется быстрый RMS с атакой около 30 мс и спадом около 150 мс. Это измерение уровня, не психоакустической громкости.",
-        "TruePk": "True Peak (dBTP) — оценка пика восстановленной волны между цифровыми сэмплами, вычисленная с 4-кратной передискретизацией. Может быть выше Sample Peak.",
+        "RMS": "RMS (dBFS) — текущий среднеквадратичный уровень аудиоблока, сглаженный с атакой около 30 мс и спадом около 150 мс. Это же значение используется для заливки метра. Для стерео усредняется энергия L/R.",
+        "TruePk": "True Peak (dBTP) — накопленный максимум оценки пика восстановленной волны с начала измерения. Используется 4-кратная передискретизация с 12-отводным windowed-sinc фильтром. Может быть выше Sample Peak. Это оценка, точность не сертифицирована.",
         "I": "Integrated loudness (LUFS) — K-взвешенная интегральная громкость с начала текущего измерения; применяется абсолютный и относительный гейтинг BS.1770. −23 LUFS — целевой уровень EBU R 128, а не универсальная цель для любого материала.",
         "LRA": "Loudness Range (LU) — разность 95-го и 10-го перцентилей распределения Short-term громкости по 3-секундным окнам после гейтинга EBU Tech 3342. Оценка обычно неустойчива в первые 60 с.",
     ]
@@ -1255,9 +1272,20 @@ private struct MetricInfoRow: View {
     @State private var tooltipWorkItem: DispatchWorkItem?
     @State private var isTooltipVisible = false
 
+    private var unit: String {
+        switch name {
+        case "M", "S", "I": "LUFS"
+        case "LRA": "LU"
+        case "TruePk": "dBTP"
+        case "Peak", "RMS": "dBFS"
+        case "Crest": L("дБ")
+        default: ""
+        }
+    }
+
     var body: some View {
         HStack(spacing: 4) {
-            Text(showHints ? "\(name) (\(hint))" : name)
+            Text(showHints ? "\(L(name)) (\(L(hint)))" : L(name))
                 .font(.system(size: isPrimary ? 10 : 9, weight: isPrimary ? .semibold : .regular))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -1274,12 +1302,18 @@ private struct MetricInfoRow: View {
                     .font(.system(size: isPrimary ? 14 : 10, design: .monospaced).weight(.medium))
                     .foregroundStyle(.tertiary)
             }
+            if !unit.isEmpty {
+                Text(unit)
+                    .font(.system(size: 7))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
         }
         .contentShape(Rectangle())
         .onHover(perform: setHovered)
         .overlay(alignment: .bottomLeading) {
             if isTooltipVisible, !tooltip.isEmpty {
-                Text(tooltip)
+                Text(L(tooltip))
                     .font(.system(size: 11))
                     .foregroundStyle(.primary)
                     .padding(.horizontal, 9)
@@ -1294,7 +1328,8 @@ private struct MetricInfoRow: View {
         }
         .zIndex(isTooltipVisible ? 50 : 0)
         .accessibilityElement(children: .combine)
-        .accessibilityHint(tooltip)
+        .accessibilityHint(L(tooltip))
+        .accessibilityValue(value.map { "\($0) \(unit)" } ?? L("нет данных"))
         .onDisappear {
             tooltipWorkItem?.cancel()
             tooltipWorkItem = nil

@@ -8,6 +8,8 @@ enum BusDraftMode: String, CaseIterable, Identifiable {
     case mono = "Моно-каналы"
 
     var id: String { rawValue }
+
+    var title: String { L(rawValue) }
 }
 
 /// Сохранённая сцена: набор шин с настройками.
@@ -34,9 +36,9 @@ enum AppTheme: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .system: "Как в системе"
-        case .light: "Светлая"
-        case .dark: "Тёмная"
+        case .system: L("Как в системе")
+        case .light: L("Светлая")
+        case .dark: L("Тёмная")
         }
     }
 
@@ -71,6 +73,10 @@ final class AppModel: ObservableObject {
     @Published var appTheme: AppTheme {
         didSet { UserDefaults.standard.set(appTheme.rawValue, forKey: "AirMonitor.appTheme") }
     }
+    @Published var appLanguage: AppLanguage {
+        didSet { UserDefaults.standard.set(appLanguage.rawValue, forKey: "AirMonitor.appLanguage") }
+    }
+    @Published var selectedTab: AppTab = .dashboard
 
     // Снимки для UI
     @Published var snapshot: AppSnapshot = .empty
@@ -132,6 +138,7 @@ final class AppModel: ObservableObject {
 
     init() {
         appTheme = AppTheme(rawValue: UserDefaults.standard.string(forKey: "AirMonitor.appTheme") ?? "") ?? .system
+        appLanguage = .current
         showMetricHints = UserDefaults.standard.bool(forKey: "AirMonitor.showMetricHints")
         let savedOffset = UserDefaults.standard.float(forKey: "AirMonitor.lufsOffset")
         lufsOffset = savedOffset
@@ -260,7 +267,7 @@ final class AppModel: ObservableObject {
     /// Работает и во время мониторинга — шина подключается на лету.
     func commitDraftBus() {
         guard let device = draftDevice else {
-            errorMessage = "Выберите входное устройство"
+            errorMessage = L("Выберите входное устройство")
             return
         }
 
@@ -268,13 +275,13 @@ final class AppModel: ObservableObject {
         switch draftMode {
         case .stereo:
             guard draftLeft != draftRight else {
-                errorMessage = "Для стерео выберите два разных канала"
+                errorMessage = L("Для стерео выберите два разных канала")
                 return
             }
             mode = .stereo(left: draftLeft, right: draftRight)
         case .mono:
             guard !draftMonoChannels.isEmpty else {
-                errorMessage = "Выберите хотя бы один канал"
+                errorMessage = L("Выберите хотя бы один канал")
                 return
             }
             mode = .mono(channels: draftMonoChannels.sorted())
@@ -532,7 +539,7 @@ final class AppModel: ObservableObject {
 
     func startCapture() {
         guard !buses.isEmpty else {
-            errorMessage = "Добавьте хотя бы одну шину мониторинга"
+            errorMessage = L("Добавьте хотя бы одну шину мониторинга")
             return
         }
 
@@ -580,7 +587,7 @@ final class AppModel: ObservableObject {
             for config in busesToStart {
                 if !publisher.addBus(config) {
                     ok = false
-                    failureMessage = "Не удалось подключиться к каналам «\(config.name)»"
+                    failureMessage = LF("Не удалось подключиться к каналам «%@»", config.name)
                     break
                 }
             }

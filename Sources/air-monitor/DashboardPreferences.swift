@@ -9,8 +9,8 @@ enum DashboardColumnLayout: Int, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .one: "Одна колонка"
-        case .two: "Две колонки"
+        case .one: L("Одна колонка")
+        case .two: L("Две колонки")
         }
     }
 }
@@ -24,9 +24,9 @@ enum DashboardCardSize: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .compact: "Компактный"
-        case .standard: "Стандартный"
-        case .large: "Крупный"
+        case .compact: L("Компактный")
+        case .standard: L("Стандартный")
+        case .large: L("Крупный")
         }
     }
 
@@ -91,10 +91,10 @@ extension DashboardModule {
 
     var title: String {
         switch self {
-        case .levels: "Уровни и метрики"
-        case .loudness: "LUFS по времени"
-        case .spectrum: "Спектр АЧХ"
-        case .mixBalance: "Баланс микса"
+        case .levels: L("Уровни и метрики")
+        case .loudness: L("LUFS по времени")
+        case .spectrum: L("Спектр АЧХ")
+        case .mixBalance: L("Баланс микса")
         }
     }
 

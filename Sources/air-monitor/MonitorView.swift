@@ -25,7 +25,7 @@ struct MonitorView: View {
                     }
                     .pickerStyle(.inline)
                 } label: {
-                    Label("S: \(sWindowLabel) с", systemImage: "timer")
+                    Label(LF("S: %@ с", sWindowLabel), systemImage: "timer")
                         .lineLimit(1)
                         .frame(width: 92, alignment: .trailing)
                 }
@@ -64,7 +64,7 @@ struct MonitorView: View {
                     Text("Максимальное (0.008)").tag(Float(0.008))
                 }
                 .pickerStyle(.inline)
-                .help("Отдельно сглаживает отображаемые значения M/S: чем меньше значение, тем длиннее спад. Интегральная громкость и LRA от этой настройки не меняются. Выкл показывает несглаженные M/S.")
+                .help(L("Отдельно сглаживает отображаемые значения M/S: чем меньше значение, тем длиннее спад. Интегральная громкость и LRA от этой настройки не меняются. Выкл показывает несглаженные M/S."))
 
                 Divider()
 
@@ -80,7 +80,7 @@ struct MonitorView: View {
                     Text("Калибровка: +1 дБ").tag(Float(1))
                 }
                 .pickerStyle(.inline)
-                .help("Если значения устойчиво расходятся с эталонным метром (Youlean и др.), выберите компенсирующий офсет. Сохраняется между запусками.")
+                .help(L("Если значения устойчиво расходятся с эталонным метром (Youlean и др.), выберите компенсирующий офсет. Сохраняется между запусками."))
                 } label: {
                     Label("Настройки", systemImage: "slider.horizontal.3")
                         .lineLimit(1)
@@ -200,7 +200,7 @@ struct MonitorBusRow: View {
                 }
                 Spacer()
                 if let correlation = snapshot?.correlation {
-                    Text(String(format: "Корр. L/R: %.2f", correlation))
+                    Text(LF("Корр. L/R: %.2f", correlation))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -221,7 +221,7 @@ struct MonitorBusRow: View {
                         snapshot: summary,
                         showHints: showHints
                     )
-                    .frame(width: showHints ? 200 : 160, alignment: .leading)
+                    .frame(width: showHints ? 250 : 160, alignment: .leading)
                     LoudnessHistoryChart(holder: holder, isStereo: isStereo)
                     .frame(maxWidth: .infinity)
                     .frame(height: meterHeight)
@@ -234,8 +234,8 @@ struct MonitorBusRow: View {
 
     private var modeLabel: String {
         switch busMode {
-        case .stereo(let l, let r): return "Стерео \(l + 1)/\(r + 1)"
-        case .mono(let ch): return "Моно " + ch.map { "\($0 + 1)" }.joined(separator: "+")
+        case .stereo(let l, let r): return LF("Стерео %d/%d", l + 1, r + 1)
+        case .mono(let ch): return L("Моно ") + ch.map { "\($0 + 1)" }.joined(separator: "+")
         }
     }
 }
