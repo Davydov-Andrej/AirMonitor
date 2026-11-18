@@ -153,7 +153,7 @@ struct SpectrumCurveChart: View {
                 } else {
                     legendLine(.secondary.opacity(0.45), "тонкая кривая выкл.")
                 }
-                legendLine(.secondary.opacity(colorScheme == .dark ? 0.5 : 0.4), LF("полосы 1/%d окт", model.rtaSettings.bandsPerOctave))
+                legendLine(.accentColor.opacity(colorScheme == .dark ? 0.6 : 0.4), LF("полосы 1/%d окт", model.rtaSettings.bandsPerOctave))
                 if model.rtaSettings.peakHoldSeconds > 0 {
                     legendLine(.primary.opacity(0.4), LF("пик-холд %.1f с", model.rtaSettings.peakHoldSeconds))
                 } else {

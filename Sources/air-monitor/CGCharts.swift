@@ -156,8 +156,8 @@ enum CGChart {
                     let right = xPos(rightFrequency, width: size.width)
                     let barWidth = max(0, right - left - 2)
                     let h = yPos(band.levelDB, height: size.height)
-                    let rect = CGRect(x: left + 1, y: 0, width: barWidth, height: h)
-                    fill(ctx, CGPath(rect: rect, transform: nil), color: .secondaryLabelColor, alpha: isDark ? 0.24 : 0.16)
+                    let rect = CGRect(x: left + 1, y: h, width: barWidth, height: size.height - h)
+                    fill(ctx, CGPath(rect: rect, transform: nil), color: .controlAccentColor, alpha: isDark ? 0.24 : 0.18)
                     if band.peakDB > minDB {
                         let ph = yPos(band.peakDB, height: size.height)
                         let peak = CGRect(x: left + 1, y: ph, width: barWidth, height: 1.5)
@@ -175,12 +175,12 @@ enum CGChart {
                                     y: yPos(point.magnitudeDB, height: size.height))
                     if i == 0 {
                         path.move(to: p)
-                        area.move(to: CGPoint(x: p.x, y: 0))
+                        area.move(to: CGPoint(x: p.x, y: size.height))
                     } else { path.addLine(to: p) }
                     area.addLine(to: p)
                 }
                 if let last = fine.last {
-                    area.addLine(to: CGPoint(x: xPos(last.frequency, width: size.width), y: 0))
+                    area.addLine(to: CGPoint(x: xPos(last.frequency, width: size.width), y: size.height))
                     area.closeSubpath()
                 }
                 fill(ctx, area, color: .controlAccentColor, alpha: isDark ? 0.14 : 0.10)
